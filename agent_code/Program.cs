@@ -4,10 +4,10 @@ using System.Threading;
 namespace Chimera
 {
     // WinExe target — no console window
-    // STAThread required for some Windows API calls
-    [System.STAThread]
     static class Program
     {
+        // STAThread required for Clipboard and some Windows API calls
+        [System.STAThread]
         static void Main(string[] args)
         {
             // Hide console window if somehow spawned with one
