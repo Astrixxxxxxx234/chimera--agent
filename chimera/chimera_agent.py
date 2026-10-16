@@ -1,6 +1,6 @@
 from mythic_container.MythicCommandBase import *
 from mythic_container.PayloadBuilder import *
-from agent_functions import shell, upload, download, ls, pwd, cd, sleep, kill
+from agent_functions import shell, upload, download, ls, pwd, cd, sleep, kill, persist, inject_assembly, runas_exec, help
 import os, subprocess, shutil
 
 class Chimera(PayloadType):
@@ -74,6 +74,10 @@ class Chimera(PayloadType):
                     f"{build_dir}/Commands/Cd.cs",
                     f"{build_dir}/Commands/Sleep.cs",
                     f"{build_dir}/Commands/Kill.cs",
+                    f"{build_dir}/Commands/Help.cs",
+                    f"{build_dir}/Commands/Persist.cs",
+                    f"{build_dir}/Commands/InjectAssembly.cs",
+                    f"{build_dir}/Commands/RunasExec.cs",
                 ],
                 capture_output=True,
                 text=True

