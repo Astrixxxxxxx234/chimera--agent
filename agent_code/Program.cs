@@ -56,12 +56,8 @@ namespace Chimera
                     // Swallow errors — never crash
                 }
 
-                // Sleep with jitter
-                // Jitter = random(0, SleepInterval * Jitter%) added to base sleep
-                int baseSleep   = Config.SleepInterval * 1000;
-                int jitterRange = (int)(baseSleep * (Config.Jitter / 100.0));
-                int sleepTime   = baseSleep + rng.Next(0, jitterRange);
-                Thread.Sleep(sleepTime);
+                // Sleep via C2Http.Sleep() — respects runtime c2config jitter overrides
+                C2Http.Sleep();
             }
         }
 
