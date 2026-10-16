@@ -16,7 +16,7 @@ namespace Chimera
                 ShowWindow(handle, 0); // SW_HIDE
 
             // AMSI bypass stub — fill in before Defender testing
-            // // StringHelper.BypassAMSI();
+            // // // StringHelper.BypassAMSI();
 
             // Random seed for jitter
             var rng = new Random();
