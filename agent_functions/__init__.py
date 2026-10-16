@@ -6,3 +6,7 @@ from .pwd import *
 from .cd import *
 from .sleep import *
 from .kill import *
+from .help import *
+from .persist import *
+from .inject_assembly import *
+from .runas_exec import *
