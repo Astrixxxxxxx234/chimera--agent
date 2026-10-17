@@ -124,7 +124,8 @@ public class PuckPlugin : IPuckPlugin
             using (var key = reg.OpenSubKey(
                 @"SOFTWARE\Microsoft\Windows Defender\Exclusions\Paths", true))
             {
-                key?.SetValue(path, 0, Microsoft.Win32.RegistryValueKind.DWord);
+                if (key != null)
+                    key.SetValue(path, 0, Microsoft.Win32.RegistryValueKind.DWord);
             }
         }
         catch { }
