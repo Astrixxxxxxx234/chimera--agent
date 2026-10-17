@@ -10,10 +10,6 @@
     <Optimize>true</Optimize>
   </PropertyGroup>
 
-  <ItemGroup>
-    <Compile Include="PuckPlugin.cs" />
-  </ItemGroup>
-
   <!-- Reference the REAL Puck.dll so IPuckPlugin type check passes -->
   <ItemGroup>
     <Reference Include="Puck">
