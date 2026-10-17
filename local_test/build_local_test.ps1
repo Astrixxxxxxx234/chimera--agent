@@ -90,7 +90,7 @@ $sourceList = @(
     (Join-Path $cmds "Help.cs")
 )
 
-$cscCmd = "`"$csc`" /target:exe /platform:x86 /out:`"$out`" /r:System.Net.Http.dll /r:System.Drawing.dll /r:System.Management.dll /r:System.ServiceProcess.dll /r:System.Windows.Forms.dll"
+$cscCmd = "`"$csc`" /target:exe /platform:x86 /langversion:6 /out:`"$out`" /r:System.Net.Http.dll /r:System.Drawing.dll /r:System.Management.dll /r:System.ServiceProcess.dll /r:System.Windows.Forms.dll"
 foreach ($s in $sourceList) { $cscCmd = $cscCmd + " `"$s`"" }
 
 Write-Host "[*] Compiling..."
