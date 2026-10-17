@@ -1,1 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🐉</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Chimera: serpent body with dragon head and flame -->
+  <!-- Body — coiled snake -->
+  <ellipse cx="50" cy="62" rx="28" ry="18" fill="none" stroke="#7c3aed" stroke-width="6" stroke-linecap="round"/>
+  <!-- Head -->
+  <ellipse cx="72" cy="44" rx="13" ry="9" fill="#7c3aed"/>
+  <!-- Eye -->
+  <circle cx="77" cy="42" r="2.5" fill="#fbbf24"/>
+  <circle cx="77.8" cy="41.5" r="1" fill="#111"/>
+  <!-- Jaw / fangs -->
+  <path d="M63 48 Q67 55 65 56" stroke="#c4b5fd" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path d="M63 48 Q59 54 61 57" stroke="#c4b5fd" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <!-- Horn -->
+  <path d="M70 35 L73 24 L68 33" fill="#a78bfa"/>
+  <!-- Flame from mouth -->
+  <path d="M78 46 Q90 38 88 28 Q82 36 84 30 Q76 38 80 34 Q72 42 78 46Z" fill="#f97316"/>
+  <path d="M80 47 Q94 42 94 32 Q87 40 90 34 Q82 42 86 38 Q78 44 80 47Z" fill="#fbbf24" opacity="0.7"/>
+  <!-- Tail tip -->
+  <path d="M22 55 Q10 60 14 70 Q18 65 22 68" fill="none" stroke="#7c3aed" stroke-width="4" stroke-linecap="round"/>
+  <!-- Spine spikes -->
+  <path d="M36 44 L32 36 M44 40 L42 32 M52 40 L52 31" stroke="#a78bfa" stroke-width="2.5" stroke-linecap="round"/>
+</svg>
