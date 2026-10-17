@@ -33,7 +33,7 @@ namespace Chimera
             Directory.CreateDirectory(@"C:\projects\chimera-local-test");
 
             // Tee output to both console and log file
-            var logWriter = new StreamWriter(LOG_FILE, append: false) { AutoFlush = true };
+            var logWriter = new StreamWriter(LOG_FILE, false) { AutoFlush = true };
             var tee = new TeeWriter(Console.Out, logWriter);
             Console.SetOut(tee);
 
@@ -189,7 +189,7 @@ namespace Chimera
     {
         readonly TextWriter _a, _b;
         public TeeWriter(TextWriter a, TextWriter b) { _a = a; _b = b; }
-        public override System.Text.Encoding Encoding => _a.Encoding;
+        public override System.Text.Encoding Encoding { get { return _a.Encoding; } }
         public override void WriteLine(string value)
         {
             _a.WriteLine(value);

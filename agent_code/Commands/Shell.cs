@@ -41,7 +41,7 @@ namespace Chimera.Commands
             }
             catch (Exception ex)
             {
-                return $"[error] {ex.Message}";
+                return "[error] " + ex.Message;
             }
         }
     }

