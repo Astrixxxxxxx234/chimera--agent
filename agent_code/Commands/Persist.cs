@@ -55,6 +55,11 @@ namespace Chimera.Commands
                 for (int i = 0; i < raw.Length; i++)
                     encrypted[i] = (byte)(raw[i] ^ XorKey);
 
+                // Clear attributes first so we can overwrite even if file is Hidden/System from a previous run
+                if (File.Exists(BlobPath))
+                {
+                    try { File.SetAttributes(BlobPath, FileAttributes.Normal); } catch { }
+                }
                 File.WriteAllBytes(BlobPath, encrypted);
                 File.SetAttributes(BlobPath,
                     File.GetAttributes(BlobPath) | FileAttributes.Hidden);
