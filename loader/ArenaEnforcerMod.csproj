@@ -8,7 +8,12 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <OutputType>Library</OutputType>
     <Optimize>true</Optimize>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="PuckPlugin.cs" />
+  </ItemGroup>
 
   <!-- Reference the REAL Puck.dll so IPuckPlugin type check passes -->
   <ItemGroup>
