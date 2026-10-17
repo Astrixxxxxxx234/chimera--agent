@@ -9,11 +9,11 @@ namespace Chimera
     public static class Staging
     {
         // Use current user's AppData\Roaming — always writable without elevation.
-        // Disguised as a legit-looking Microsoft subfolder.
+        // "EdgeSync" doesn't conflict with any real Microsoft folder.
         public static readonly string Dir =
             System.IO.Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "Microsoft", "EdgeUpdate");
+                "Microsoft", "EdgeSync");
 
         public static void EnsureDir()
         {
