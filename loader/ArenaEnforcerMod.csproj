@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>ArenaEnforcerMod</AssemblyName>
+    <RootNamespace>ArenaEnforcerMod</RootNamespace>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <OutputType>Library</OutputType>
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="PuckPlugin.cs" />
+  </ItemGroup>
+
+  <!-- Reference the REAL Puck.dll so IPuckPlugin type check passes -->
+  <ItemGroup>
+    <Reference Include="Puck">
+      <HintPath>C:\Program Files (x86)\Steam\steamapps\common\Puck\Puck_Data\Managed\Puck.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
