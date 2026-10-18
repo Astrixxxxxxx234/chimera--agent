@@ -51,7 +51,7 @@ function Wrap($json) {
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add($Bind)
 $listener.Start()
-Write-Host "[C2] Listening on $Bind  (Mythic wire protocol — base64 wrapped)"
+Write-Host "[C2] Listening on $Bind  (Mythic wire protocol - base64 wrapped)"
 Write-Host "[C2] Queue task:  Set-Content $TaskFile 'command params'"
 Write-Host ""
 
