@@ -10,6 +10,6 @@ namespace Chimera
         public static int    SleepInterval   = 10;   // seconds
         public static int    Jitter          = 30;   // % of SleepInterval
         public static string UserAgent       = "Microsoft-CryptoAPI/10.0";
-        public static string PayloadUUID     = "REPLACE_ME_UUID";
+        public static string PayloadUUID     = "aabbccdd-aabb-aabb-aabb-aabbccddeeff";
     }
 }

